@@ -33,8 +33,11 @@
 
   /* ---------- 镜子区 ---------- */
   #stage { position: fixed; inset: 0 0 218px 0; display: flex; align-items: center;
-    justify-content: center; background: #000; }
-  #view { width: 100%; height: 100%; object-fit: cover; touch-action: none; }
+    justify-content: center; background: #161310; }
+  #frameBox { overflow: hidden; display: block;
+    background: #000; border-radius: 0; transition: width .15s, height .15s, border-radius .15s; }
+  #frameBox.shrunk { border-radius: 18px; border: 1px solid rgba(255,255,255,.14); }
+  #view { touch-action: none; flex: 0 0 auto; }
   video { display: none; }
   #hint { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%;
     transform: translateX(-50%); background: rgba(16,15,14,.72); backdrop-filter: blur(8px);
@@ -165,13 +168,13 @@
   <button id="startBtn">开启镜子</button>
   <div class="privacy">所有画面仅在本机处理,不会离开你的手机</div>
   <div id="loadMsg"></div>
-  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v1.3.3</div>
+  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v1.4</div>
 </div>
 
 <video id="video" playsinline muted autoplay></video>
 
 <div id="stage">
-  <canvas id="view"></canvas>
+  <div id="frameBox"><canvas id="view"></canvas></div>
   <div id="hint"></div>
   <div id="skinChip">
     <span id="skinTxt"></span>
@@ -195,7 +198,7 @@
     <div class="hRow"><b>一键试色</b>点任意色号,口红立刻上唇,适合快速挑色。</div>
     <div class="hRow"><b>亲手上妆</b>用手指在屏幕里的嘴唇上来回涂抹,越涂越浓;涂出界会自动裁掉,不会画花;可换"卸妆棉"局部擦掉。</div>
     <div class="hRow"><b>唇型</b>拖动白色圆点改唇形,或点微笑唇/嘟嘟唇等预设。</div>
-    <div class="hRow"><b>小手势</b>右上 +/− 调画面大小,双指张开放大、捏合缩小(摄像头太近时缩小看全脸,缩小后边缘黑色是取景边界);按住"按住对比"看素颜;不满意点 Clear 重来。</div>
+    <div class="hRow"><b>小手势</b>右上 +/− 调画面大小,双指张开放大、捏合缩小(摄像头太近时缩小看全脸,镜子窗口会一起变小);按住"按住对比"看素颜;不满意点 Clear 重来。</div>
     <div class="hRow"><b>隐私</b>所有画面只在你的手机上处理,不会上传。</div>
     <button class="chip solid" id="helpClose" style="margin-top:14px;width:100%;padding:11px 0;">知道了,开始试妆</button>
   </div>
@@ -373,17 +376,36 @@ $("startBtn").addEventListener("click", async () => {
     btn.disabled = false; return;
   }
 
-  // 画布尺寸 = 视频尺寸(限制长边,保证流畅)
-  const vw = video.videoWidth || 720, vh = video.videoHeight || 1280;
-  const s = Math.min(1, 1280 / Math.max(vw, vh));
-  cv.width = Math.round(vw * s); cv.height = Math.round(vh * s);
-  maskC.width = glossC.width = cv.width; maskC.height = glossC.height = cv.height;
+  relayout();
+  window.addEventListener("resize", () => setTimeout(relayout, 200));
 
   $("startScreen").style.display = "none";
   S.phase = "analyze";
   hint("正在分析你的肤色,请正对镜头…", true);
   pumpToken++; pump(pumpToken); requestAnimationFrame(render);
 });
+
+/* ---------- 布局:画布比例 = 镜区比例,视频以"铺满"为 1x 基准 ---------- */
+const stage = $("stage"), frameBox = $("frameBox");
+let stW = 0, stH = 0;
+const vidFit = { x0: 0, y0: 0, dw: 0, dh: 0 };             // 视频在画布坐标系中的适配矩形
+function relayout() {
+  const r = stage.getBoundingClientRect();
+  stW = Math.max(1, Math.round(r.width)); stH = Math.max(1, Math.round(r.height));
+  cv.style.width = stW + "px"; cv.style.height = stH + "px";
+  const W = Math.min(810, stW * 2);                        // 内部分辨率(约2x密度,上限810)
+  cv.width = Math.round(W); cv.height = Math.round(W * stH / stW);
+  maskC.width = glossC.width = cv.width; maskC.height = glossC.height = cv.height;
+  computeVidFit();
+  S.base = null;                                           // 坐标系变了,关键点重新平滑
+}
+function computeVidFit() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh || !cv.width) return;
+  const s0 = Math.max(cv.width / vw, cv.height / vh);      // cover:1x 时画面恰好铺满镜框
+  vidFit.dw = vw * s0; vidFit.dh = vh * s0;
+  vidFit.x0 = (cv.width - vidFit.dw) / 2; vidFit.y0 = (cv.height - vidFit.dh) / 2;
+}
 
 /* 识别循环:令牌防止重复,看门狗负责卡死自愈 */
 let pumpToken = 0, lastPump = 0;
@@ -422,11 +444,13 @@ function onResults(res) {
   const faces = res.multiFaceLandmarks;
   if (!faces || !faces.length) { S.lostFrames++; if (S.lostFrames === 20 && S.phase === "live") hint("未检测到人脸,请正对镜头"); return; }
   S.lostFrames = 0;
-  const W = cv.width, H = cv.height, raw = faces[0];
-  if (!S.base) S.base = raw.map(p => ({ x: (1 - p.x) * W, y: p.y * H, vx: 0, vy: 0 }));
+  if (!vidFit.dw) computeVidFit();
+  const { x0, y0, dw, dh } = vidFit, raw = faces[0];
+  if (!dw) return;
+  if (!S.base) S.base = raw.map(p => ({ x: x0 + (1 - p.x) * dw, y: y0 + p.y * dh, vx: 0, vy: 0 }));
   else for (let i = 0; i < raw.length; i++) {
     // 自适应平滑:位移小(噪声)→强平滑;位移大(真实运动)→全速跟随
-    const t = S.base[i], nx = (1 - raw[i].x) * W, ny = raw[i].y * H;
+    const t = S.base[i], nx = x0 + (1 - raw[i].x) * dw, ny = y0 + raw[i].y * dh;
     const d = Math.hypot(nx - t.x, ny - t.y);
     const a = Math.min(1, Math.max(0.14, d / 9));
     const mx = (nx - t.x) * a, my = (ny - t.y) * a;
@@ -486,20 +510,16 @@ function toPaintXY(px, py, f) {                          // 画布点 → 涂抹
   const lu = (dx * f.ux + dy * f.uy) / f.mw, lv = (dx * f.vx + dy * f.vy) / f.mw;
   return [ (lu - OFFX) / SPANX * PW, (lv - OFFY) / SPANY * PH ];
 }
-function clientToCanvas(e) {                             // 触点 → 画布坐标(object-fit:cover)
+function clientToCanvas(e) {                             // 触点 → 画布坐标(显示尺寸由JS直控)
   const r = cv.getBoundingClientRect();
-  const s = Math.max(r.width / cv.width, r.height / cv.height);
-  return [ (e.clientX - r.left - (r.width - cv.width * s) / 2) / s,
-           (e.clientY - r.top - (r.height - cv.height * s) / 2) / s, s ];
+  const s = r.width / cv.width || 1;
+  return [ (e.clientX - r.left) / s, (e.clientY - r.top) / s, s ];
 }
 
 /* ---------- 数字变焦 ---------- */
-function minZoom() {                                       // 下限 = 完整显示摄像头整幅画面
-  const r = cv.getBoundingClientRect();
-  if (!r.width || !cv.width) return 0.75;
-  const cover = Math.max(r.width / cv.width, r.height / cv.height);
-  const contain = Math.min(r.width / cv.width, r.height / cv.height);
-  return Math.max(0.5, contain / cover);
+function minZoom() {                                       // 下限:摄像头整幅画面恰好完整显露
+  if (!vidFit.dw) return 0.5;
+  return clamp(Math.min(cv.width / vidFit.dw, cv.height / vidFit.dh), 0.3, 1);
 }
 function zparams() {
   const W = cv.width, H = cv.height, z = S.zoom;
@@ -530,10 +550,23 @@ function render() {
   }
   const zp = zparams();
 
+  // 镜框随缩放收缩:画面缩到多大,镜子窗口就收到多大,不留黑边
+  const fz = Math.min(1, zp.z);
+  if (Math.abs(fz - (S._lastFz || 0)) > 0.001) {
+    S._lastFz = fz;
+    frameBox.style.width = Math.round(stW * fz) + "px";
+    frameBox.style.height = Math.round(stH * fz) + "px";
+    frameBox.classList.toggle("shrunk", fz < 0.999);
+    cv.style.marginLeft = Math.round(-stW * (1 - fz) / 2) + "px";
+    cv.style.marginTop = Math.round(-stH * (1 - fz) / 2) + "px";
+  }
+
   ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);              // 防残影:先清底
+  if (!vidFit.dw) computeVidFit();
   ctx.save();
   ctx.translate(W / 2, H / 2); ctx.scale(zp.z, zp.z); ctx.translate(-zp.cx, -zp.cy);
-  ctx.scale(-1, 1); ctx.drawImage(video, -W, 0, W, H);          // 镜像 + 变焦
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, -(vidFit.x0 + vidFit.dw), vidFit.y0, vidFit.dw, vidFit.dh);  // 镜像+变焦
   ctx.restore();
 
   if (!S.base) return;
@@ -881,7 +914,7 @@ $("zoomIn").addEventListener("click", () => {
 $("zoomOut").addEventListener("click", () => {
   const before = S.zoom; setZoom(S.zoom - 0.5);
   if (S.zoom === before) hint("已是完整画面,不能再缩小了");
-  else if (S.zoom < 1) hint("边缘黑色区域是摄像头取景范围之外");
+  else if (S.zoom < 1) hint("镜子已缩小,显示更完整的画面");
 });
 
 $("texSeg").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
