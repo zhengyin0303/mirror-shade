@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>镜色 · AR 口红试妆镜(原型)</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js"></script>
+<style>
+  :root { --accent: #C2152E; --bg: #100F0E; --panel: #1C1A18; --line: rgba(255,255,255,.12);
+          --txt: #F5F1EC; --muted: #A39B92; }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--txt);
+    font-family: -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif; }
+  button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+
+  /* ---------- 启动页 ---------- */
+  #startScreen { position: fixed; inset: 0; z-index: 50; background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 32px; }
+  #startScreen .mark { font-family: "Songti SC", "Noto Serif SC", serif; font-size: 56px;
+    letter-spacing: .18em; font-weight: 600; }
+  #startScreen .mark em { font-style: normal; color: var(--accent); }
+  #startScreen .sub { margin-top: 10px; font-size: 14px; color: var(--muted); letter-spacing: .35em; }
+  #startScreen .desc { margin-top: 36px; font-size: 14px; color: var(--muted); line-height: 2; max-width: 300px; }
+  #startBtn { margin-top: 40px; padding: 14px 56px; border-radius: 999px; font-size: 16px;
+    background: var(--accent); color: #fff; transition: transform .1s; }
+  #startBtn:active { transform: scale(.96); }
+  #startBtn[disabled] { opacity: .5; }
+  .privacy { margin-top: 22px; font-size: 12px; color: var(--muted); display: flex; gap: 6px;
+    align-items: center; justify-content: center; }
+  .privacy::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #4CAF7D; }
+  #loadMsg { margin-top: 14px; font-size: 12px; color: var(--muted); min-height: 16px; }
+
+  /* ---------- 镜子区 ---------- */
+  #stage { position: fixed; inset: 0 0 218px 0; display: flex; align-items: center;
+    justify-content: center; background: #000; }
+  #view { width: 100%; height: 100%; object-fit: cover; touch-action: none; }
+  video { display: none; }
+  #hint { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%;
+    transform: translateX(-50%); background: rgba(16,15,14,.72); backdrop-filter: blur(8px);
+    padding: 7px 16px; border-radius: 999px; font-size: 13px; color: var(--txt);
+    white-space: nowrap; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  #hint.show { opacity: 1; }
+  #skinChip { position: absolute; top: calc(52px + env(safe-area-inset-top)); left: 50%;
+    transform: translateX(-50%); background: rgba(16,15,14,.72); backdrop-filter: blur(8px);
+    padding: 9px 14px; border-radius: 14px; font-size: 12px; line-height: 1.7; color: var(--txt);
+    display: none; max-width: 86%; text-align: left; }
+  #skinChip.show { display: block; }
+  #skinChip button { display: inline; color: var(--muted); font-size: 12px;
+    text-decoration: underline; padding: 0 0 0 4px; white-space: nowrap; }
+  .chipBtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+  .chipBtns button { text-decoration: none !important; padding: 5px 14px !important;
+    border-radius: 999px; font-size: 12px !important; }
+  #toneEdit { border: 1px solid var(--line); color: var(--txt) !important; }
+  #toneOK { background: var(--accent); color: #fff !important; }
+  #skinBadge { position: absolute; left: 0; top: calc(68px + env(safe-area-inset-top));
+    background: rgba(16,15,14,.72); backdrop-filter: blur(8px); color: var(--txt);
+    font-size: 12px; padding: 11px 12px 11px 9px; border-radius: 0 22px 22px 0;
+    border: 1px solid var(--line); border-left: none; display: none; white-space: nowrap; }
+  #skinBadge.show { display: block; }
+  #compareTag { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    background: rgba(16,15,14,.72); padding: 6px 18px; border-radius: 999px; font-size: 13px;
+    letter-spacing: .2em; display: none; }
+  #zoomBtn { position: absolute; right: 12px; top: calc(12px + env(safe-area-inset-top));
+    width: 44px; height: 44px; border-radius: 50%; background: rgba(16,15,14,.72);
+    backdrop-filter: blur(8px); color: var(--txt); font-size: 13px; border: 1px solid var(--line); }
+  #zoomBtn:active { border-color: var(--accent); color: var(--accent); }
+  #helpBtn { position: absolute; left: 12px; top: calc(12px + env(safe-area-inset-top));
+    width: 44px; height: 44px; border-radius: 50%; background: rgba(16,15,14,.72);
+    backdrop-filter: blur(8px); color: var(--txt); font-size: 17px; border: 1px solid var(--line); }
+  #helpModal { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.65);
+    display: none; align-items: center; justify-content: center; padding: 22px; }
+  #helpModal.show { display: flex; }
+  #helpModal .box { background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    padding: 22px; width: 100%; max-width: 360px; max-height: 80vh; overflow-y: auto; }
+  #helpModal h3 { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+  .hRow { font-size: 13px; color: var(--muted); line-height: 1.8; padding: 9px 0;
+    border-bottom: 1px solid var(--line); }
+  .hRow b { display: block; color: var(--txt); font-weight: 500; }
+
+  /* ---------- 控制面板 ---------- */
+  #panel { position: fixed; left: 0; right: 0; bottom: 0; min-height: 218px; background: var(--panel);
+    border-top: 1px solid var(--line); padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 9px; z-index: 10; }
+  .row { display: flex; align-items: center; gap: 8px; }
+
+  /* 模式标签 */
+  #tabs { gap: 4px; }
+  .tab { padding: 7px 15px; border-radius: 999px; font-size: 13px; color: var(--muted);
+    border: 1px solid transparent; }
+  .tab.on { color: var(--txt); border-color: var(--accent); }
+  #shotBtn { margin-left: auto; width: 36px; height: 36px; border-radius: 50%;
+    border: 2px solid var(--txt); display: flex; align-items: center; justify-content: center; }
+  #shotBtn::after { content: ""; width: 24px; height: 24px; border-radius: 50%; background: var(--txt); }
+  #shotBtn:active::after { background: var(--accent); }
+
+  /* 色板 */
+  #swatches { overflow-x: auto; scrollbar-width: none; gap: 12px; padding: 2px 0; min-height: 58px; }
+  #swatches::-webkit-scrollbar { display: none; }
+  .sw { flex: 0 0 auto; width: 44px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .sw .dot { width: 36px; height: 36px; border-radius: 50%; border: 2px solid transparent;
+    position: relative; transition: transform .12s; }
+  .sw.on .dot { border-color: #fff; transform: scale(1.12); }
+  .sw .nm { font-size: 10px; color: var(--muted); white-space: nowrap; }
+  .sw.on .nm { color: var(--txt); }
+  .sw .star { position: absolute; top: -5px; right: -5px; width: 15px; height: 15px;
+    border-radius: 50%; background: #F2C14E; color: #5A3E00; font-size: 10px; line-height: 15px;
+    text-align: center; display: none; }
+  .sw.rec .star { display: block; }
+
+  /* 工具行(随模式切换):可横向滑动,窄屏不丢按钮 */
+  #tools { min-height: 36px; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+  #tools::-webkit-scrollbar { display: none; }
+  #tools > * { flex: 0 0 auto; }
+  .chip { padding: 7px 11px; border-radius: 999px; font-size: 12px; color: var(--muted);
+    border: 1px solid var(--line); white-space: nowrap; }
+  .chip.on { color: var(--txt); border-color: var(--accent); }
+  .chip.solid { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .toolNote { font-size: 11px; color: var(--muted); margin-left: auto; white-space: nowrap; }
+
+  /* 底部:浓度 / 质地 / Clear / 对比 */
+  #bottomRow { gap: 8px; }
+  #bottomRow label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; height: 3px; border-radius: 2px;
+    background: rgba(255,255,255,.2); outline: none; min-width: 40px; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px;
+    border-radius: 50%; background: var(--accent); border: 2px solid #fff; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex: 0 0 auto; }
+  .seg button { padding: 7px 10px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  #clearBtn { padding: 8px 11px; border-radius: 999px; font-size: 13px; color: var(--txt);
+    border: 1px solid var(--line); white-space: nowrap; flex: 0 0 auto; }
+  #compareBtn { padding: 8px 11px; border-radius: 999px; font-size: 13px; white-space: nowrap; flex: 0 0 auto;
+    border: 1px solid var(--line); color: var(--txt); user-select: none; -webkit-user-select: none; }
+  #compareBtn:active { background: rgba(255,255,255,.12); }
+
+  /* 弹窗 */
+  #toneModal { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.6);
+    display: none; align-items: center; justify-content: center; }
+  #toneModal.show { display: flex; }
+  #toneModal .box { background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    padding: 24px; width: 300px; text-align: center; }
+  #toneModal h3 { font-size: 16px; font-weight: 500; }
+  #toneModal p { font-size: 12px; color: var(--muted); margin: 12px 0 18px; line-height: 1.8; }
+  #toneModal .opts { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  #toneModal .opts button { flex: 1; min-width: 50px; padding: 10px 0; border-radius: 12px; font-size: 13px;
+    border: 1px solid var(--line); color: var(--muted); }
+  #toneModal .opts button.on { border-color: var(--accent); color: var(--accent); font-weight: 500; }
+  #toneModal .grpT { font-size: 12px; color: var(--muted); text-align: left; margin: 16px 0 8px; }
+  #toneSave { width: 100%; margin-top: 20px; padding: 12px 0; border-radius: 12px;
+    background: var(--accent); color: #fff; font-size: 15px; }
+</style>
+</head>
+<body>
+
+<div id="startScreen">
+  <div class="mark">镜<em>色</em></div>
+  <div class="sub">MIRROR SHADE</div>
+  <div class="desc">一面诚实的试妆镜。<br>不磨皮、不滤镜,真实还原每一支口红<br>涂在你唇上的样子。</div>
+  <button id="startBtn">开启镜子</button>
+  <div class="privacy">所有画面仅在本机处理,不会离开你的手机</div>
+  <div id="loadMsg"></div>
+</div>
+
+<video id="video" playsinline muted autoplay></video>
+
+<div id="stage">
+  <canvas id="view"></canvas>
+  <div id="hint"></div>
+  <div id="skinChip">
+    <span id="skinTxt"></span>
+    <div class="chipBtns">
+      <button id="toneEdit">修改</button>
+      <button id="toneOK">确认</button>
+    </div>
+  </div>
+  <button id="skinBadge" aria-label="查看肤色结果">暖皮</button>
+  <div id="compareTag">素 颜</div>
+  <button id="zoomBtn" aria-label="缩放画面">1x</button>
+  <button id="helpBtn" aria-label="使用说明">?</button>
+</div>
+
+<div id="helpModal">
+  <div class="box">
+    <h3>镜色 · 怎么玩</h3>
+    <div class="hRow"><b>★ 是什么</b>打开镜子时已自动分析你的肤色,色板里带 ★ 的色号是为你挑的显白色。</div>
+    <div class="hRow"><b>一键试色</b>点任意色号,口红立刻上唇,适合快速挑色。</div>
+    <div class="hRow"><b>亲手上妆</b>用手指在屏幕里的嘴唇上来回涂抹,越涂越浓;涂出界会自动裁掉,不会画花;可换"卸妆棉"局部擦掉。</div>
+    <div class="hRow"><b>唇型</b>拖动白色圆点改唇形,或点微笑唇/嘟嘟唇等预设。</div>
+    <div class="hRow"><b>小手势</b>双指张开放大、捏合缩小(摄像头太近时可缩小看全脸,右上 1x 按钮循环切换);按住"按住对比"看素颜;不满意点 Clear 重来。</div>
+    <div class="hRow"><b>隐私</b>所有画面只在你的手机上处理,不会上传。</div>
+    <button class="chip solid" id="helpClose" style="margin-top:14px;width:100%;padding:11px 0;">知道了,开始试妆</button>
+  </div>
+</div>
+
+<div id="panel">
+  <div class="row" id="tabs">
+    <button class="tab on" data-mode="oneclick">一键试色</button>
+    <button class="tab" data-mode="smear">亲手上妆</button>
+    <button class="tab" data-mode="shape">唇型</button>
+    <button id="shotBtn" title="拍照保存" aria-label="拍照保存"></button>
+  </div>
+
+  <div class="row" id="swatches"></div>
+
+  <div class="row" id="tools">
+    <span class="toolNote" id="modeNote">点选色号,口红立刻上唇</span>
+  </div>
+
+  <div class="row" id="bottomRow">
+    <label>浓度</label>
+    <input type="range" id="intensity" min="15" max="100" value="70" step="1">
+    <div class="seg" id="texSeg">
+      <button data-tex="matte" class="on">哑光</button>
+      <button data-tex="gloss">水光</button>
+    </div>
+    <button id="compareBtn">按住对比</button>
+    <button id="clearBtn">Clear</button>
+  </div>
+</div>
+
+<div id="toneModal">
+  <div class="box">
+    <h3>修改肤色信息</h3>
+    <p>小技巧:手腕血管偏蓝紫是冷调,偏青绿是暖调;<br>戴银饰更显白是冷调,金饰更显白是暖调。</p>
+    <div class="grpT">色调</div>
+    <div class="opts" id="toneOpts">
+      <button data-tone="cool">冷调</button>
+      <button data-tone="neutral">中性</button>
+      <button data-tone="warm">暖调</button>
+    </div>
+    <div class="grpT">肤色深浅</div>
+    <div class="opts" id="depthOpts">
+      <button data-depth="白皙">白皙</button>
+      <button data-depth="自然">自然</button>
+      <button data-depth="小麦">小麦</button>
+      <button data-depth="深肤">深肤</button>
+    </div>
+    <button id="toneSave">保存</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ====================================================================
+   镜色 MirrorShade —— AR 口红试妆原型
+   阶段1+2:镜面预览 / 肤色分析推荐 / 一键试色 / 手指涂抹 / 唇型编辑
+   全部端侧运行,无任何画面上传。
+==================================================================== */
+
+/* ---------- 唇部关键点(MediaPipe Face Mesh 468点) ---------- */
+const OUTER = [61,146,91,181,84,17,314,405,321,375,291,409,270,269,267,0,37,39,40,185];
+const INNER = [78,95,88,178,87,14,317,402,318,324,308,415,310,311,312,13,82,81,80,191];
+
+/* 唇型控制点:ring = 在 OUTER 数组中的序号 */
+const CTRLS = [
+  { key:"lc",  ring:0,  pair:"rc"  },   // 左嘴角
+  { key:"ll",  ring:2,  pair:"rl"  },   // 左下唇
+  { key:"bc",  ring:5,  pair:null  },   // 下唇中央
+  { key:"rl",  ring:8,  pair:"ll"  },   // 右下唇
+  { key:"rc",  ring:10, pair:"lc"  },   // 右嘴角
+  { key:"rp",  ring:13, pair:"lp"  },   // 右唇峰
+  { key:"dip", ring:15, pair:null  },   // 唇谷
+  { key:"lp",  ring:17, pair:"rp"  },   // 左唇峰
+];
+const PRESETS = {
+  natural: {},
+  smile:  { lc:{u:-0.038,v:-0.048}, rc:{u:0.038,v:-0.048}, ll:{u:0,v:-0.012}, rl:{u:0,v:-0.012} },
+  pout:   { bc:{u:0,v:0.062}, ll:{u:0,v:0.034}, rl:{u:0,v:0.034}, dip:{u:0,v:-0.014} },
+  mlip:   { dip:{u:0,v:0.034}, lp:{u:0,v:-0.026}, rp:{u:0,v:-0.026}, lc:{u:0,v:0.010}, rc:{u:0,v:0.010} },
+};
+
+/* ---------- 色板(t: 适合的肤色调) ---------- */
+const PALETTE = [
+  { n:"枫叶红", c:"#A23E32", t:"warm" },
+  { n:"砖红",   c:"#B0483A", t:"warm" },
+  { n:"暖橘红", c:"#D94F2B", t:"warm" },
+  { n:"番茄色", c:"#E2553D", t:"warm" },
+  { n:"正红",   c:"#C2152E", t:"neutral" },
+  { n:"豆沙",   c:"#B97B72", t:"neutral" },
+  { n:"裸粉",   c:"#D08C82", t:"neutral" },
+  { n:"干玫瑰", c:"#AD5D63", t:"neutral" },
+  { n:"玫红",   c:"#C2256B", t:"cool" },
+  { n:"浆果",   c:"#8E2B4D", t:"cool" },
+  { n:"梅子",   c:"#702B50", t:"cool" },
+  { n:"冷调粉", c:"#DD5E8E", t:"cool" },
+];
+
+/* ---------- 全局状态 ---------- */
+const S = {
+  phase: "boot",            // boot → analyze → live
+  mode: "oneclick",         // oneclick | smear | shape
+  maskMode: "full",         // full(整唇) | paint(涂抹层)
+  color: null,              // 当前色 {n,c,t}
+  intensity: 0.7,
+  texture: "matte",
+  compare: false,
+  lm: null,                 // 平滑后的关键点 [ {x,y} ... ] 画布坐标(已镜像)
+  lostFrames: 0,
+  offsets: {},              // 唇型偏移 { key: {u,v} } 单位=嘴宽比例
+  symmetric: true,
+  brush: "big",             // big | small
+  eraser: false,
+  dragCtrl: null,
+  painting: false,
+  lastPaint: null,
+  tone: null, depth: null,  // 肤色分析结果
+  samples: [], sampleSkip: 0,
+  base: null,               // 平滑后的关键点(未缩放的基准坐标)
+  zoom: 1, zc: null,        // 数字变焦倍率 / 变焦中心(跟随面部)
+  pinch: null, prevMode: null,
+};
+const pointers = new Map();   // 多点触控追踪(捏合缩放)
+CTRLS.forEach(c => S.offsets[c.key] = { u:0, v:0 });
+
+/* ---------- DOM ---------- */
+const $ = id => document.getElementById(id);
+const video = $("video"), cv = $("view"), ctx = cv.getContext("2d");
+const maskC = document.createElement("canvas"), maskX = maskC.getContext("2d");
+const glossC = document.createElement("canvas"), glossX = glossC.getContext("2d");
+const PW = 512, PH = 512;                       // 涂抹层(唇部局部坐标系)
+const paintC = document.createElement("canvas"); paintC.width = PW; paintC.height = PH;
+const paintX = paintC.getContext("2d");
+const OFFX = -0.3, SPANX = 1.6, OFFY = -0.55, SPANY = 1.1;  // 局部系映射范围
+
+let hintTimer = null;
+function hint(msg, stay) {
+  const h = $("hint"); h.textContent = msg; h.classList.add("show");
+  clearTimeout(hintTimer);
+  if (!stay) hintTimer = setTimeout(() => h.classList.remove("show"), 2200);
+}
+function hideHint(){ $("hint").classList.remove("show"); }
+
+/* ====================================================================
+   启动:摄像头 + FaceMesh
+==================================================================== */
+let faceMesh = null;
+
+$("startBtn").addEventListener("click", async () => {
+  const btn = $("startBtn"), msg = $("loadMsg");
+  btn.disabled = true; msg.textContent = "正在请求摄像头…";
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 1280 } },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+  } catch (e) {
+    msg.textContent = "无法访问摄像头:请确认已授权,且页面通过 https:// 或 localhost 打开。";
+    btn.disabled = false; return;
+  }
+
+  msg.textContent = "正在加载人脸识别模型(首次约需数秒)…";
+  try {
+    faceMesh = new FaceMesh({
+      locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}`,
+    });
+    faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true,
+      minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    faceMesh.onResults(onResults);
+    if (typeof faceMesh.initialize === "function") await faceMesh.initialize();
+  } catch (e) {
+    msg.textContent = "模型加载失败,请检查网络后刷新重试。";
+    btn.disabled = false; return;
+  }
+
+  // 画布尺寸 = 视频尺寸(限制长边,保证流畅)
+  const vw = video.videoWidth || 720, vh = video.videoHeight || 1280;
+  const s = Math.min(1, 1280 / Math.max(vw, vh));
+  cv.width = Math.round(vw * s); cv.height = Math.round(vh * s);
+  maskC.width = glossC.width = cv.width; maskC.height = glossC.height = cv.height;
+
+  $("startScreen").style.display = "none";
+  S.phase = "analyze";
+  hint("正在分析你的肤色,请正对镜头…", true);
+  pumpToken++; pump(pumpToken); requestAnimationFrame(render);
+});
+
+/* 识别循环:令牌防止重复,看门狗负责卡死自愈 */
+let pumpToken = 0, lastPump = 0;
+async function pump(token) {
+  if (token !== pumpToken) return;
+  lastPump = Date.now();
+  if (video.readyState >= 2) { try { await faceMesh.send({ image: video }); } catch (e) {} }
+  requestAnimationFrame(() => pump(token));
+}
+async function resumeCamera() {
+  try {
+    const tr = video.srcObject && video.srcObject.getVideoTracks()[0];
+    if (!tr || tr.readyState !== "live") {                  // 摄像头被系统回收:重新获取
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 1280 } }, audio: false });
+      video.srcObject = stream;
+    }
+    await video.play();                                     // 仅被暂停:直接恢复
+  } catch (e) { hint("摄像头恢复失败,请下拉刷新页面", true); }
+}
+document.addEventListener("visibilitychange", () => {       // 从其它App切回来
+  if (document.visibilityState === "visible" && S.phase !== "boot") {
+    resumeCamera();
+    pumpToken++; pump(pumpToken);
+  }
+});
+setInterval(() => {                                          // 看门狗:识别停摆超2.5秒自动重启
+  if (document.visibilityState === "visible" && S.phase !== "boot"
+      && faceMesh && Date.now() - lastPump > 2500) {
+    resumeCamera();
+    pumpToken++; pump(pumpToken);
+  }
+}, 3000);
+
+function onResults(res) {
+  const faces = res.multiFaceLandmarks;
+  if (!faces || !faces.length) { S.lostFrames++; if (S.lostFrames === 20 && S.phase === "live") hint("未检测到人脸,请正对镜头"); return; }
+  S.lostFrames = 0;
+  const W = cv.width, H = cv.height, raw = faces[0];
+  if (!S.base) S.base = raw.map(p => ({ x: (1 - p.x) * W, y: p.y * H, vx: 0, vy: 0 }));
+  else for (let i = 0; i < raw.length; i++) {
+    // 自适应平滑:位移小(噪声)→强平滑;位移大(真实运动)→全速跟随
+    const t = S.base[i], nx = (1 - raw[i].x) * W, ny = raw[i].y * H;
+    const d = Math.hypot(nx - t.x, ny - t.y);
+    const a = Math.min(1, Math.max(0.14, d / 9));
+    const mx = (nx - t.x) * a, my = (ny - t.y) * a;
+    t.x += mx; t.y += my;
+    t.vx = t.vx * 0.5 + mx * 0.5; t.vy = t.vy * 0.5 + my * 0.5;   // 平滑速度
+  }
+}
+const LEAD = 0.6;   // 速度前瞻系数:补偿识别管线的固有延迟
+
+/* ====================================================================
+   几何工具
+==================================================================== */
+function mouthFrame() {                                  // 唇部局部坐标系(原始点,不含偏移)
+  const L = S.lm[61], R = S.lm[291];
+  const dx = R.x - L.x, dy = R.y - L.y, mw = Math.hypot(dx, dy) || 1;
+  const ux = dx / mw, uy = dy / mw;
+  return { L, mw, ux, uy, vx: -uy, vy: ux };             // v 垂直于嘴角连线,指向下方
+}
+function vertexOffset(j, f) {                            // 控制点偏移在环上的扩散(线性衰减)
+  let du = 0, dv = 0;
+  for (const c of CTRLS) {
+    const o = S.offsets[c.key]; if (!o.u && !o.v) continue;
+    let d = Math.abs(j - c.ring); d = Math.min(d, 20 - d);
+    const w = Math.max(0, 1 - d / 3); if (!w) continue;
+    du += o.u * w; dv += o.v * w;
+  }
+  return { x: (f.ux * du + f.vx * dv) * f.mw, y: (f.uy * du + f.vy * dv) * f.mw };
+}
+function ringPts(ids, f, scale) {
+  return ids.map((id, j) => {
+    const o = vertexOffset(j, f), p = S.lm[id];
+    return [p.x + o.x * scale, p.y + o.y * scale];
+  });
+}
+function smoothPath(c, pts) {                            // 闭合 Catmull-Rom → 贝塞尔
+  const n = pts.length; c.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
+    c.bezierCurveTo(p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6,
+                    p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6, p2[0], p2[1]);
+  }
+  c.closePath();
+}
+function buildLipPath(c, f) {                            // 外环+内环,evenodd 镂空口腔(护牙)
+  c.beginPath();
+  smoothPath(c, ringPts(OUTER, f, 1));
+  smoothPath(c, ringPts(INNER, f, 0.5));
+}
+function paintMatrix(f) {                                // 涂抹层 → 画布 的仿射矩阵
+  const sx = f.mw * SPANX / PW, sy = f.mw * SPANY / PH;
+  return [ f.ux * sx, f.uy * sx, f.vx * sy, f.vy * sy,
+    f.L.x + (f.ux * OFFX + f.vx * OFFY) * f.mw,
+    f.L.y + (f.uy * OFFX + f.vy * OFFY) * f.mw ];
+}
+function toPaintXY(px, py, f) {                          // 画布点 → 涂抹层像素
+  const dx = px - f.L.x, dy = py - f.L.y;
+  const lu = (dx * f.ux + dy * f.uy) / f.mw, lv = (dx * f.vx + dy * f.vy) / f.mw;
+  return [ (lu - OFFX) / SPANX * PW, (lv - OFFY) / SPANY * PH ];
+}
+function clientToCanvas(e) {                             // 触点 → 画布坐标(object-fit:cover)
+  const r = cv.getBoundingClientRect();
+  const s = Math.max(r.width / cv.width, r.height / cv.height);
+  return [ (e.clientX - r.left - (r.width - cv.width * s) / 2) / s,
+           (e.clientY - r.top - (r.height - cv.height * s) / 2) / s, s ];
+}
+
+/* ---------- 数字变焦 ---------- */
+function minZoom() {                                       // 下限 = 完整显示摄像头整幅画面
+  const r = cv.getBoundingClientRect();
+  if (!r.width || !cv.width) return 0.75;
+  const cover = Math.max(r.width / cv.width, r.height / cv.height);
+  const contain = Math.min(r.width / cv.width, r.height / cv.height);
+  return Math.max(0.5, contain / cover);
+}
+function zparams() {
+  const W = cv.width, H = cv.height, z = S.zoom;
+  let cx = S.zc ? S.zc.x : W / 2, cy = S.zc ? S.zc.y : H / 2;
+  const hw = W / (2 * z), hh = H / (2 * z);
+  return { z,
+    cx: hw * 2 >= W ? W / 2 : clamp(cx, hw, W - hw),      // 缩小时居中显示
+    cy: hh * 2 >= H ? H / 2 : clamp(cy, hh, H - hh) };
+}
+function setZoom(z) {
+  S.zoom = clamp(z, minZoom(), 3);
+  $("zoomBtn").textContent = S.zoom.toFixed(1).replace(/\.0$/, "") + "x";
+}
+
+/* ====================================================================
+   渲染主循环
+==================================================================== */
+function render() {
+  requestAnimationFrame(render);
+  const W = cv.width, H = cv.height;
+  if (!W || video.readyState < 2) return;
+
+  // 变焦中心缓慢跟随鼻尖,避免画面晃动
+  if (S.base) {
+    const n = S.base[1];
+    if (!S.zc) S.zc = { x: n.x, y: n.y };
+    else { S.zc.x += (n.x - S.zc.x) * 0.06; S.zc.y += (n.y - S.zc.y) * 0.06; }
+  }
+  const zp = zparams();
+
+  ctx.save();
+  ctx.translate(W / 2, H / 2); ctx.scale(zp.z, zp.z); ctx.translate(-zp.cx, -zp.cy);
+  ctx.scale(-1, 1); ctx.drawImage(video, -W, 0, W, H);          // 镜像 + 变焦
+  ctx.restore();
+
+  if (!S.base) return;
+  S.lm = S.base.map(p => ({ x: (p.x + p.vx * LEAD - zp.cx) * zp.z + W / 2,   // 关键点+速度前瞻 → 变焦坐标系
+                            y: (p.y + p.vy * LEAD - zp.cy) * zp.z + H / 2 }));
+  if (S.phase === "analyze") { sampleSkin(); return; }
+
+  const f = mouthFrame();
+  if (!S.compare && S.color) drawMakeup(f);
+  if (S.mode === "shape" && !S.compare) drawShapeUI(f);
+}
+
+/* ---------- 口红渲染 ---------- */
+function drawMakeup(f) {
+  const W = cv.width, H = cv.height, i = S.intensity;
+
+  // 1) 生成蒙版(白色,带透明度)
+  maskX.clearRect(0, 0, W, H);
+  if (S.maskMode === "full") {
+    maskX.save();
+    try { maskX.filter = "blur(2.5px)"; } catch (e) {}
+    buildLipPath(maskX, f);
+    maskX.fillStyle = "#fff"; maskX.fill("evenodd");
+    try { maskX.filter = "none"; } catch (e) {}
+    maskX.restore();
+  } else {
+    maskX.save();
+    buildLipPath(maskX, f); maskX.clip("evenodd");        // 锁区:涂出界自动裁掉
+    const m = paintMatrix(f);
+    maskX.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+    maskX.drawImage(paintC, 0, 0);
+    maskX.setTransform(1, 0, 0, 1, 0, 0);
+    maskX.restore();
+  }
+  // 2) 蒙版着色
+  maskX.save();
+  maskX.globalCompositeOperation = "source-in";
+  maskX.fillStyle = S.color.c; maskX.fillRect(0, 0, W, H);
+  maskX.restore();
+
+  // 3) 合成到画面:color 换色保留唇纹 + multiply 加深
+  ctx.save();
+  ctx.globalCompositeOperation = "color";    ctx.globalAlpha = 0.78 * i; ctx.drawImage(maskC, 0, 0);
+  ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = 0.50 * i; ctx.drawImage(maskC, 0, 0);
+  ctx.restore();
+
+  // 4) 水光质地:下唇高光
+  if (S.texture === "gloss") {
+    const a = S.lm[17], b = S.lm[14];                      // 下唇外/内中点
+    const hx = (a.x + b.x) / 2, hy = (a.y + b.y) / 2, r = f.mw * 0.34;
+    glossX.clearRect(0, 0, W, H);
+    const g = glossX.createRadialGradient(hx, hy, 0, hx, hy, r);
+    g.addColorStop(0, "rgba(255,255,255,.95)"); g.addColorStop(0.45, "rgba(255,255,255,.35)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    glossX.save(); glossX.translate(hx, hy); glossX.scale(1, 0.42); glossX.translate(-hx, -hy);
+    glossX.fillStyle = g; glossX.fillRect(hx - r, hy - r, r * 2, r * 2); glossX.restore();
+    const u = S.lm[0], ui = S.lm[13];                      // 上唇小高光
+    const ux2 = (u.x + ui.x) / 2, uy2 = (u.y + ui.y) / 2, r2 = f.mw * 0.16;
+    const g2 = glossX.createRadialGradient(ux2, uy2, 0, ux2, uy2, r2);
+    g2.addColorStop(0, "rgba(255,255,255,.5)"); g2.addColorStop(1, "rgba(255,255,255,0)");
+    glossX.save(); glossX.translate(ux2, uy2); glossX.scale(1, 0.4); glossX.translate(-ux2, -uy2);
+    glossX.fillStyle = g2; glossX.fillRect(ux2 - r2, uy2 - r2, r2 * 2, r2 * 2); glossX.restore();
+    glossX.save(); glossX.globalCompositeOperation = "destination-in";
+    glossX.drawImage(maskC, 0, 0); glossX.restore();       // 高光只落在已上色区域
+    ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.55 * i;
+    ctx.drawImage(glossC, 0, 0); ctx.restore();
+  }
+}
+
+/* ---------- 唇型编辑覆盖层 ---------- */
+function drawShapeUI(f) {
+  const pts = ringPts(OUTER, f, 1);
+  ctx.save();
+  ctx.beginPath(); smoothPath(ctx, pts);
+  ctx.setLineDash([7, 6]); ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.stroke();
+  ctx.setLineDash([]);
+  for (const c of CTRLS) {
+    const p = pts[c.ring];
+    ctx.beginPath(); ctx.arc(p[0], p[1], 9, 0, Math.PI * 2);
+    ctx.fillStyle = S.dragCtrl === c.key ? getAccent() : "#fff";
+    ctx.strokeStyle = getAccent(); ctx.lineWidth = 2.5;
+    ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+function getAccent() {
+  return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#C2152E";
+}
+
+/* ====================================================================
+   肤色分析:多帧采样脸颊/额头 → Lab → 冷暖调 + 深浅
+==================================================================== */
+const SKIN_PTS = [101, 330, 108, 337];                    // 左右脸颊 + 左右额头
+function sampleSkin() {
+  if (++S.sampleSkip < 10) return;                        // 等画面稳定
+  if (S.sampleSkip > 600) {                               // ~20秒仍未完成:兜底
+    S.tone = "neutral"; S.depth = "";
+    finishAnalysis(); hint("光线不足,已按中性调推荐,可点\u201c修改\u201d手动选择");
+    return;
+  }
+  const W = cv.width;
+  let r = 0, g = 0, b = 0, n = 0;
+  for (const id of SKIN_PTS) {
+    const p = S.lm[id]; if (!p) continue;
+    const box = Math.max(4, Math.round(W * 0.012));
+    try {
+      const d = ctx.getImageData(Math.round(p.x - box), Math.round(p.y - box), box * 2, box * 2).data;
+      for (let k = 0; k < d.length; k += 4) { r += d[k]; g += d[k + 1]; b += d[k + 2]; n++; }
+    } catch (e) {}
+  }
+  if (!n) return;
+  S.samples.push([r / n, g / n, b / n]);
+  if (S.samples.length < 36) {
+    if (S.samples.length % 9 === 0) hint(`正在分析你的肤色… ${Math.round(S.samples.length / 36 * 100)}%`, true);
+    return;
+  }
+  // 取中段均值,抗瞬时光照波动
+  S.samples.sort((A, B) => (A[0]+A[1]+A[2]) - (B[0]+B[1]+B[2]));
+  const mid = S.samples.slice(9, 27);
+  const avg = mid.reduce((a, s) => [a[0]+s[0], a[1]+s[1], a[2]+s[2]], [0,0,0]).map(v => v / mid.length);
+  const lab = rgb2lab(avg[0], avg[1], avg[2]);
+  const hue = Math.atan2(lab.b, lab.a) * 180 / Math.PI;   // 色相角:大→偏黄(暖),小→偏红(冷)
+  const ita = Math.atan2(lab.L - 50, lab.b) * 180 / Math.PI;  // ITA°:皮肤深浅
+  S.tone = hue >= 53 ? "warm" : hue <= 45 ? "cool" : "neutral";
+  S.depth = ita > 41 ? "白皙" : ita > 28 ? "自然" : ita > 10 ? "小麦" : "深肤";
+  finishAnalysis();
+}
+function rgb2lab(r, g, b) {
+  let x = [r, g, b].map(v => { v /= 255; return v > 0.04045 ? Math.pow((v + 0.055) / 1.055, 2.4) : v / 12.92; });
+  const X = (x[0]*0.4124 + x[1]*0.3576 + x[2]*0.1805) / 0.95047;
+  const Y =  x[0]*0.2126 + x[1]*0.7152 + x[2]*0.0722;
+  const Z = (x[0]*0.0193 + x[1]*0.1192 + x[2]*0.9505) / 1.08883;
+  const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+  return { L: 116 * f(Y) - 16, a: 500 * (f(X) - f(Y)), b: 200 * (f(Y) - f(Z)) };
+}
+function finishAnalysis() {
+  S.phase = "live"; hideHint();
+  applyTone();
+  $("skinChip").classList.add("show"); $("skinBadge").classList.remove("show");
+  hint("在下方挑一支口红试试,带 ★ 的最适合你", true);
+  setTimeout(hideHint, 4500);
+}
+function toneText() {
+  const d = S.depth ? `·${S.depth}肤色` : "";
+  if (S.tone === "warm") return `你是暖皮(肤色偏黄调)${d}。涂橘红、砖红这类暖色更显白,下方带 ★ 的就是为你挑的`;
+  if (S.tone === "cool") return `你是冷皮(肤色偏粉调)${d}。涂玫红、浆果这类冷色更显白,下方带 ★ 的就是为你挑的`;
+  return `你是中性皮${d},冷暖色都能驾驭。下方带 ★ 的是百搭显白色`;
+}
+const TONE_BADGE = { warm: "暖皮", cool: "冷皮", neutral: "中性" };
+function applyTone() {
+  $("skinTxt").textContent = toneText();
+  $("skinBadge").textContent = TONE_BADGE[S.tone] || "肤色";
+  buildSwatches();
+}
+
+/* ====================================================================
+   色板
+==================================================================== */
+function buildSwatches() {
+  const box = $("swatches"); box.innerHTML = "";
+  const match = p => S.tone == null ? false : (p.t === S.tone || p.t === "neutral");
+  const list = [...PALETTE].sort((a, b) => (match(b) ? 1 : 0) - (match(a) ? 1 : 0));
+  for (const p of list) {
+    const el = document.createElement("button");
+    el.className = "sw" + (match(p) ? " rec" : "") + (S.color && S.color.c === p.c ? " on" : "");
+    el.innerHTML = `<span class="dot" style="background:${p.c}"><span class="star">★</span></span><span class="nm">${p.n}</span>`;
+    el.addEventListener("click", () => {
+      S.color = p;
+      document.documentElement.style.setProperty("--accent", p.c);   // 界面强调色随口红走
+      box.querySelectorAll(".sw").forEach(s => s.classList.remove("on"));
+      el.classList.add("on");
+      if (S.mode === "smear" && paintEmpty()) hint("用手指在嘴唇上来回涂抹,反复叠涂颜色会更浓");
+    });
+    box.appendChild(el);
+  }
+}
+let paintHasContent = false;
+function paintEmpty() { return !paintHasContent; }
+
+/* ====================================================================
+   模式切换 + 工具行
+==================================================================== */
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => setMode(t.dataset.mode)));
+
+function setMode(m) {
+  if (m === "shape" && S.mode !== "shape") S.prevMode = S.mode;
+  S.mode = m;
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.mode === m));
+  const tools = $("tools"); tools.innerHTML = "";
+
+  if (m === "oneclick") {
+    S.maskMode = "full";
+    tools.innerHTML = `<span class="toolNote">点选色号,口红立刻上唇</span>`;
+  }
+  if (m === "smear") {
+    if (S.maskMode === "full" && S.color && !paintHasContent) {   // 从整唇切来且涂层为空:铺满,可局部擦除
+      paintX.fillStyle = "#fff"; paintX.fillRect(0, 0, PW, PH); paintHasContent = true;
+    }
+    S.maskMode = "paint";
+    tools.innerHTML = `
+      <button class="chip on" id="brushBig">大刷</button>
+      <button class="chip" id="brushSmall">小刷</button>
+      <button class="chip" id="eraserBtn">卸妆棉</button>
+      <span class="toolNote">在唇上涂抹·出界自动裁掉</span>`;
+    $("brushBig").onclick   = () => setBrush("big");
+    $("brushSmall").onclick = () => setBrush("small");
+    $("eraserBtn").onclick  = () => { S.eraser = !S.eraser; $("eraserBtn").classList.toggle("on", S.eraser); };
+    if (!S.color) hint("先在色板选一支口红,再用手指涂抹");
+  }
+  if (m === "shape") {
+    tools.innerHTML = `
+      <button class="chip on" data-ps="natural">原生</button>
+      <button class="chip" data-ps="smile">微笑唇</button>
+      <button class="chip" data-ps="pout">嘟嘟唇</button>
+      <button class="chip" data-ps="mlip">M唇</button>
+      <button class="chip on" id="symBtn">对称</button>
+      <button class="chip solid" id="shapeDone">完成</button>`;
+    const PS_NAME = { natural: "原生唇型", smile: "微笑唇", pout: "嘟嘟唇", mlip: "M唇" };
+    tools.querySelectorAll("[data-ps]").forEach(b => b.onclick = () => {
+      applyPreset(b.dataset.ps);
+      tools.querySelectorAll("[data-ps]").forEach(x => x.classList.toggle("on", x === b));
+      hint(`已应用${PS_NAME[b.dataset.ps]},还可拖动圆点微调`);
+    });
+    $("symBtn").onclick = () => { S.symmetric = !S.symmetric; $("symBtn").classList.toggle("on", S.symmetric); };
+    $("shapeDone").onclick = () => setMode(S.prevMode || "oneclick");
+    hint("拖动白色圆点调整唇型,或点选预设");
+  }
+}
+function setBrush(b) {
+  S.brush = b; S.eraser = false;
+  $("brushBig").classList.toggle("on", b === "big");
+  $("brushSmall").classList.toggle("on", b === "small");
+  const e = $("eraserBtn"); if (e) e.classList.remove("on");
+}
+function applyPreset(name) {
+  CTRLS.forEach(c => S.offsets[c.key] = { u: 0, v: 0 });
+  const ps = PRESETS[name] || {};
+  for (const k in ps) S.offsets[k] = { u: ps[k].u, v: ps[k].v };
+}
+
+/* ====================================================================
+   触摸交互:涂抹 / 拖控制点
+==================================================================== */
+cv.addEventListener("pointerdown", e => {
+  if (S.phase !== "live" || !S.lm) return;
+  cv.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, [e.clientX, e.clientY]);
+  if (pointers.size === 2) {                               // 双指:进入捏合缩放
+    const p = [...pointers.values()];
+    S.pinch = { d0: Math.hypot(p[0][0]-p[1][0], p[0][1]-p[1][1]) || 1, z0: S.zoom };
+    S.painting = false; S.dragCtrl = null;
+    return;
+  }
+  const [x, y, scale] = clientToCanvas(e);
+  const f = mouthFrame();
+
+  if (S.mode === "shape") {
+    const pts = ringPts(OUTER, f, 1);
+    let best = null, bd = 38 / scale;                      // 命中半径(屏幕38px)
+    for (const c of CTRLS) {
+      const p = pts[c.ring], d = Math.hypot(p[0] - x, p[1] - y);
+      if (d < bd) { bd = d; best = c.key; }
+    }
+    S.dragCtrl = best; S.lastPaint = [x, y];
+    return;
+  }
+  if (S.mode === "smear" && S.color) {
+    S.painting = true; S.lastPaint = null;
+    stampTo(x, y, f);
+  }
+});
+
+cv.addEventListener("pointermove", e => {
+  if (S.phase !== "live" || !S.lm) return;
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, [e.clientX, e.clientY]);
+  if (S.pinch && pointers.size >= 2) {                     // 捏合中:只处理缩放
+    const p = [...pointers.values()];
+    const d = Math.hypot(p[0][0]-p[1][0], p[0][1]-p[1][1]) || 1;
+    setZoom(S.pinch.z0 * d / S.pinch.d0);
+    return;
+  }
+  const [x, y] = clientToCanvas(e);
+  const f = mouthFrame();
+
+  if (S.mode === "shape" && S.dragCtrl) {
+    const tb = $("tools");
+    if (tb) tb.querySelectorAll("[data-ps]").forEach(x => x.classList.remove("on"));
+    const dx = x - S.lastPaint[0], dy = y - S.lastPaint[1];
+    S.lastPaint = [x, y];
+    const du = (dx * f.ux + dy * f.uy) / f.mw, dv = (dx * f.vx + dy * f.vy) / f.mw;
+    const o = S.offsets[S.dragCtrl];
+    o.u = clamp(o.u + du, -0.09, 0.09); o.v = clamp(o.v + dv, -0.09, 0.09);
+    const ctrl = CTRLS.find(c => c.key === S.dragCtrl);
+    if (S.symmetric && ctrl.pair) {
+      S.offsets[ctrl.pair] = { u: -o.u, v: o.v };
+    } else if (S.symmetric && !ctrl.pair) { o.u = 0; }     // 中线点对称时只允许上下移
+    return;
+  }
+  if (S.mode === "smear" && S.painting) stampTo(x, y, f);
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) S.pinch = null;
+  S.painting = false; S.dragCtrl = null;
+}
+cv.addEventListener("pointerup", endPointer);
+cv.addEventListener("pointercancel", endPointer);
+cv.addEventListener("wheel", e => { e.preventDefault(); setZoom(S.zoom - e.deltaY * 0.0025); }, { passive: false });
+
+function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+
+/* 在涂抹层盖一笔(两点间插值,避免断点) */
+function stampTo(x, y, f) {
+  const [px, py] = toPaintXY(x, y, f);
+  const r = S.brush === "big" ? 56 : 30;
+  const step = r * 0.45;
+  let from = S.lastPaint || [px, py];
+  const dist = Math.hypot(px - from[0], py - from[1]);
+  const n = Math.max(1, Math.ceil(dist / step));
+  for (let i = 1; i <= n; i++) stamp(from[0] + (px - from[0]) * i / n, from[1] + (py - from[1]) * i / n, r);
+  S.lastPaint = [px, py];
+}
+function stamp(px, py, r) {
+  paintX.save();
+  if (S.eraser) { paintX.globalCompositeOperation = "destination-out"; paintX.globalAlpha = 0.5; }
+  else { paintX.globalCompositeOperation = "source-over"; paintX.globalAlpha = S.brush === "big" ? 0.11 : 0.15; paintHasContent = true; }
+  const g = paintX.createRadialGradient(px, py, 0, px, py, r);
+  g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.65, "rgba(255,255,255,.55)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  paintX.fillStyle = g; paintX.beginPath(); paintX.arc(px, py, r, 0, Math.PI * 2); paintX.fill();
+  paintX.restore();
+}
+
+/* ====================================================================
+   底部控件
+==================================================================== */
+$("intensity").addEventListener("input", e => S.intensity = e.target.value / 100);
+
+$("zoomBtn").addEventListener("click", () => {
+  const z = S.zoom;
+  if (z < 1) { setZoom(1); hint("已回到原始大小"); }
+  else if (z < 1.5) { setZoom(1.5); hint("双指张开放大、捏合缩小,变焦跟随面部"); }
+  else if (z < 2) { setZoom(2); }
+  else { setZoom(minZoom()); hint("已缩小显示完整画面,再点一下回到原始大小"); }
+});
+
+$("texSeg").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+  S.texture = b.dataset.tex;
+  $("texSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+}));
+
+$("clearBtn").addEventListener("click", () => {
+  S.color = null; paintX.clearRect(0, 0, PW, PH); paintHasContent = false;
+  document.querySelectorAll(".sw").forEach(s => s.classList.remove("on"));
+  hint("已卸妆,挑一支新颜色吧");
+});
+
+const cmp = $("compareBtn");
+function cmpOn(e)  { e.preventDefault(); S.compare = true;  $("compareTag").style.display = "block"; }
+function cmpOff()  { S.compare = false; $("compareTag").style.display = "none"; }
+cmp.addEventListener("pointerdown", cmpOn);
+cmp.addEventListener("pointerup", cmpOff);
+cmp.addEventListener("pointerleave", cmpOff);
+cmp.addEventListener("contextmenu", e => e.preventDefault());
+
+$("shotBtn").addEventListener("click", () => {
+  cv.toBlob(async blob => {
+    if (!blob) { hint("拍照失败,可截屏代替"); return; }
+    const name = `试妆_${S.color ? S.color.n : "素颜"}.png`;
+    const file = new File([blob], name, { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); hint("选择\u201c保存图片/相册\u201d即可存入相册"); return; }
+      catch (e) { if (e && e.name === "AbortError") return; }   // 用户取消分享
+    }
+    const a = document.createElement("a");                      // 回退:下载
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    hint("已保存试妆照");
+  }, "image/png");
+});
+
+/* 帮助说明 */
+$("helpBtn").addEventListener("click", () => $("helpModal").classList.add("show"));
+$("helpClose").addEventListener("click", () => $("helpModal").classList.remove("show"));
+$("helpModal").addEventListener("click", e => { if (e.target === $("helpModal")) $("helpModal").classList.remove("show"); });
+
+/* 肤色结果:确认收起 / 标签唤回 / 修改弹窗 */
+$("toneOK").addEventListener("click", () => {
+  $("skinChip").classList.remove("show");
+  $("skinBadge").classList.add("show");
+});
+$("skinBadge").addEventListener("click", () => {
+  $("skinBadge").classList.remove("show");
+  $("skinChip").classList.add("show");
+});
+$("toneEdit").addEventListener("click", () => {
+  // 预选当前值
+  $("toneOpts").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.tone === S.tone));
+  $("depthOpts").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.depth === S.depth));
+  $("toneModal").classList.add("show");
+});
+$("toneModal").addEventListener("click", e => { if (e.target === $("toneModal")) $("toneModal").classList.remove("show"); });
+["toneOpts", "depthOpts"].forEach(id => {
+  $(id).querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+    $(id).querySelectorAll("button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+  }));
+});
+$("toneSave").addEventListener("click", () => {
+  const t = $("toneOpts").querySelector(".on"), d = $("depthOpts").querySelector(".on");
+  if (t) S.tone = t.dataset.tone;
+  S.depth = d ? d.dataset.depth : S.depth;
+  $("toneModal").classList.remove("show");
+  applyTone();
+  $("skinChip").classList.add("show"); $("skinBadge").classList.remove("show");
+  hint("已按你的选择更新推荐");
+});
+
+/* 初始 */
+buildSwatches();
+setMode("oneclick");
+</script>
+</body>
+</html>
