@@ -61,10 +61,15 @@
   #compareTag { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
     background: rgba(16,15,14,.72); padding: 6px 18px; border-radius: 999px; font-size: 13px;
     letter-spacing: .2em; display: none; }
-  #zoomBtn { position: absolute; right: 12px; top: calc(12px + env(safe-area-inset-top));
-    width: 44px; height: 44px; border-radius: 50%; background: rgba(16,15,14,.72);
-    backdrop-filter: blur(8px); color: var(--txt); font-size: 13px; border: 1px solid var(--line); }
-  #zoomBtn:active { border-color: var(--accent); color: var(--accent); }
+  #zoomIn, #zoomOut { position: absolute; right: 12px; width: 44px; height: 44px;
+    border-radius: 50%; background: rgba(16,15,14,.72); backdrop-filter: blur(8px);
+    color: var(--txt); font-size: 20px; border: 1px solid var(--line); }
+  #zoomIn { top: calc(12px + env(safe-area-inset-top)); }
+  #zoomOut { top: calc(96px + env(safe-area-inset-top)); }
+  #zoomIn:active, #zoomOut:active { border-color: var(--accent); color: var(--accent); }
+  #zoomVal { position: absolute; right: 12px; top: calc(62px + env(safe-area-inset-top));
+    width: 44px; text-align: center; font-size: 12px; color: var(--txt);
+    text-shadow: 0 1px 4px rgba(0,0,0,.8); pointer-events: none; }
   #helpBtn { position: absolute; left: 12px; top: calc(12px + env(safe-area-inset-top));
     width: 44px; height: 44px; border-radius: 50%; background: rgba(16,15,14,.72);
     backdrop-filter: blur(8px); color: var(--txt); font-size: 17px; border: 1px solid var(--line); }
@@ -160,6 +165,7 @@
   <button id="startBtn">开启镜子</button>
   <div class="privacy">所有画面仅在本机处理,不会离开你的手机</div>
   <div id="loadMsg"></div>
+  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v1.3.3</div>
 </div>
 
 <video id="video" playsinline muted autoplay></video>
@@ -176,7 +182,9 @@
   </div>
   <button id="skinBadge" aria-label="查看肤色结果">暖皮</button>
   <div id="compareTag">素 颜</div>
-  <button id="zoomBtn" aria-label="缩放画面">1x</button>
+  <button id="zoomIn" aria-label="放大">＋</button>
+  <span id="zoomVal">1x</span>
+  <button id="zoomOut" aria-label="缩小">−</button>
   <button id="helpBtn" aria-label="使用说明">?</button>
 </div>
 
@@ -187,7 +195,7 @@
     <div class="hRow"><b>一键试色</b>点任意色号,口红立刻上唇,适合快速挑色。</div>
     <div class="hRow"><b>亲手上妆</b>用手指在屏幕里的嘴唇上来回涂抹,越涂越浓;涂出界会自动裁掉,不会画花;可换"卸妆棉"局部擦掉。</div>
     <div class="hRow"><b>唇型</b>拖动白色圆点改唇形,或点微笑唇/嘟嘟唇等预设。</div>
-    <div class="hRow"><b>小手势</b>双指张开放大、捏合缩小(摄像头太近时可缩小看全脸,右上 1x 按钮循环切换);按住"按住对比"看素颜;不满意点 Clear 重来。</div>
+    <div class="hRow"><b>小手势</b>右上 +/− 调画面大小,双指张开放大、捏合缩小(摄像头太近时缩小看全脸,缩小后边缘黑色是取景边界);按住"按住对比"看素颜;不满意点 Clear 重来。</div>
     <div class="hRow"><b>隐私</b>所有画面只在你的手机上处理,不会上传。</div>
     <button class="chip solid" id="helpClose" style="margin-top:14px;width:100%;padding:11px 0;">知道了,开始试妆</button>
   </div>
@@ -503,7 +511,7 @@ function zparams() {
 }
 function setZoom(z) {
   S.zoom = clamp(z, minZoom(), 3);
-  $("zoomBtn").textContent = S.zoom.toFixed(1).replace(/\.0$/, "") + "x";
+  $("zoomVal").textContent = S.zoom.toFixed(1).replace(/\.0$/, "") + "x";
 }
 
 /* ====================================================================
@@ -522,6 +530,7 @@ function render() {
   }
   const zp = zparams();
 
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);              // 防残影:先清底
   ctx.save();
   ctx.translate(W / 2, H / 2); ctx.scale(zp.z, zp.z); ctx.translate(-zp.cx, -zp.cy);
   ctx.scale(-1, 1); ctx.drawImage(video, -W, 0, W, H);          // 镜像 + 变焦
@@ -865,12 +874,14 @@ function stamp(px, py, r) {
 ==================================================================== */
 $("intensity").addEventListener("input", e => S.intensity = e.target.value / 100);
 
-$("zoomBtn").addEventListener("click", () => {
-  const z = S.zoom;
-  if (z < 1) { setZoom(1); hint("已回到原始大小"); }
-  else if (z < 1.5) { setZoom(1.5); hint("双指张开放大、捏合缩小,变焦跟随面部"); }
-  else if (z < 2) { setZoom(2); }
-  else { setZoom(minZoom()); hint("已缩小显示完整画面,再点一下回到原始大小"); }
+$("zoomIn").addEventListener("click", () => {
+  const before = S.zoom; setZoom(S.zoom + 0.5);
+  if (S.zoom === before) hint("已放到最大(3x)");
+});
+$("zoomOut").addEventListener("click", () => {
+  const before = S.zoom; setZoom(S.zoom - 0.5);
+  if (S.zoom === before) hint("已是完整画面,不能再缩小了");
+  else if (S.zoom < 1) hint("边缘黑色区域是摄像头取景范围之外");
 });
 
 $("texSeg").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
