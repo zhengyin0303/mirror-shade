@@ -92,6 +92,10 @@
 
   /* 模式标签 */
   #tabs { gap: 4px; }
+  #tabScroll { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
+    flex: 1; min-width: 0; }
+  #tabScroll::-webkit-scrollbar { display: none; }
+  #tabScroll .tab { flex: 0 0 auto; }
   .tab { padding: 7px 15px; border-radius: 999px; font-size: 13px; color: var(--muted);
     border: 1px solid transparent; }
   .tab.on { color: var(--txt); border-color: var(--accent); }
@@ -170,6 +174,10 @@
     background: rgba(255,255,255,.06); color: var(--txt); font-size: 14px; font-family: inherit; }
   #wdColor { width: 100%; height: 46px; padding: 4px; border-radius: 12px;
     border: 1px solid var(--line); background: rgba(255,255,255,.06); }
+  #wdBrandSel { width: 100%; padding: 11px 12px; border-radius: 12px; font-size: 13px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--txt); font-family: inherit; }
+  #wdPhotoBtn { display: block; width: 100%; padding: 11px 0; border-radius: 12px; font-size: 13px;
+    border: 1px dashed var(--line); color: var(--muted); cursor: pointer; }
   #wdSave { width: 100%; margin-top: 20px; padding: 12px 0; border-radius: 12px;
     background: var(--accent); color: #fff; font-size: 15px; }
   .sw .tex { position: absolute; bottom: -2px; right: -2px; width: 12px; height: 12px;
@@ -189,7 +197,7 @@
   <button id="startBtn">开启镜子</button>
   <div class="privacy">所有画面仅在本机处理,不会离开你的手机</div>
   <div id="loadMsg"></div>
-  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v2.0</div>
+  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v2.4</div>
 </div>
 
 <video id="video" playsinline muted autoplay></video>
@@ -219,6 +227,7 @@
     <div class="hRow"><b>一键试色</b>点任意色号,口红立刻上唇,适合快速挑色。</div>
     <div class="hRow"><b>亲手上妆</b>用手指在屏幕里的嘴唇上来回涂抹,越涂越浓;涂出界会自动裁掉,不会画花;可换"卸妆棉"局部擦掉。</div>
     <div class="hRow"><b>唇型</b>拖动白色圆点改唇形,或点微笑唇/嘟嘟唇等预设。</div>
+    <div class="hRow"><b>腮红·眉妆·眼影</b>对应页签里点色即上妆:腮红有苹果肌/斜扫/晒伤三种打法;眉妆染色保留真实眉流,可加粗或挑眉;眼影可单色或外眼角渐变。浓度滑杆分品类独立记忆。</div>
     <div class="hRow"><b>口红衣橱</b>长按色板任意色号收藏进衣橱;"衣橱"页签里管理和试涂;再选相近颜色时会提醒撞色,买前查重。</div>
     <div class="hRow"><b>小手势</b>右上 +/− 调画面大小,双指张开放大、捏合缩小(摄像头太近时缩小看全脸,四周自动以模糊背景填充);按住"按住对比"看素颜;不满意点 Clear 重来。</div>
     <div class="hRow"><b>隐私</b>所有画面只在你的手机上处理,不会上传。</div>
@@ -228,10 +237,15 @@
 
 <div id="panel">
   <div class="row" id="tabs">
-    <button class="tab on" data-mode="oneclick">一键试色</button>
-    <button class="tab" data-mode="smear">亲手上妆</button>
-    <button class="tab" data-mode="shape">唇型</button>
-    <button class="tab" data-mode="wardrobe">衣橱</button>
+    <div id="tabScroll">
+      <button class="tab on" data-mode="oneclick">试色</button>
+      <button class="tab" data-mode="smear">上妆</button>
+      <button class="tab" data-mode="shape">唇型</button>
+      <button class="tab" data-mode="blush">腮红</button>
+      <button class="tab" data-mode="brow">眉妆</button>
+      <button class="tab" data-mode="eye">眼影</button>
+      <button class="tab" data-mode="wardrobe">衣橱</button>
+    </div>
     <button id="shotBtn" title="拍照保存" aria-label="拍照保存"></button>
   </div>
 
@@ -260,6 +274,10 @@
     <input type="text" id="wdName" maxlength="20" placeholder="给它起个名字">
     <div class="grpT">颜色</div>
     <input type="color" id="wdColor" value="#C2152E">
+    <div class="grpT">从经典色号快速填入(参考色值,实物为准)</div>
+    <select id="wdBrandSel"><option value="">选择品牌经典色号…</option></select>
+    <div class="grpT">或从照片取色(拍口红膏体/手臂试色)</div>
+    <label id="wdPhotoBtn">选择照片自动取色<input type="file" id="wdPhotoFile" accept="image/*" hidden></label>
     <div class="grpT">质地</div>
     <div class="opts" id="wdTex">
       <button data-t="matte" class="on">哑光</button>
@@ -356,6 +374,9 @@ const S = {
   lastPaint: null,
   tone: null, depth: null,  // 肤色分析结果
   samples: [], sampleSkip: 0, lipSamples: [], lipL: 60,
+  blush: { color: null, style: "apple", int: 0.5 },   // 腮红
+  brow:  { color: null, shape: "natural", int: 0.5 }, // 眉妆
+  eye:   { color: null, grad: false, int: 0.5 },      // 眼影
   base: null,               // 平滑后的关键点(未缩放的基准坐标)
   zoom: 1, zc: null,        // 数字变焦倍率 / 变焦中心(跟随面部)
   pinch: null, prevMode: null,
@@ -639,12 +660,137 @@ function render() {
   if (S.phase === "analyze") { sampleSkin(); return; }
 
   const f = mouthFrame();
-  if (!S.compare && S.color) drawMakeup(f);
+  if (!S.compare) drawMakeup(f);
   if (S.mode === "shape" && !S.compare) drawShapeUI(f);
 }
 
 /* ---------- 口红渲染 ---------- */
 function drawMakeup(f) {
+  if (S.blush.color) drawBlush(f);
+  if (S.brow.color)  drawBrow(f);
+  if (S.eye.color)   drawEye(f);
+  if (S.color)       drawLips(f);
+}
+
+/* ---------- 通用蒙版着色合成 ---------- */
+function compositeMask(color, aColor, aMul) {
+  maskX.save(); maskX.globalCompositeOperation = "source-in";
+  maskX.fillStyle = color; maskX.fillRect(0, 0, cv.width, cv.height); maskX.restore();
+  ctx.save();
+  ctx.globalCompositeOperation = "color";    ctx.globalAlpha = aColor; ctx.drawImage(maskC, 0, 0);
+  ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = aMul;   ctx.drawImage(maskC, 0, 0);
+  ctx.restore();
+}
+function softSpot(c, x, y, rx, ry, rot, a) {              // 柔边椭圆光斑
+  c.save(); c.translate(x, y); c.rotate(rot || 0); c.scale(1, ry / rx);
+  const g = c.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(0.65, `rgba(255,255,255,${a*0.55})`);
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  c.fillStyle = g; c.beginPath(); c.arc(0, 0, rx, 0, Math.PI*2); c.fill(); c.restore();
+}
+function lerpP(a, b, t) { return { x: a.x + (b.x-a.x)*t, y: a.y + (b.y-a.y)*t }; }
+
+/* ---------- 腮红 ---------- */
+function drawBlush(f) {
+  const W = cv.width, H = cv.height, it = S.blush.int;
+  const L = S.lm[205], R = S.lm[425], TL = S.lm[234], TR = S.lm[454], NB = S.lm[195];
+  if (!L || !R) return;
+  maskX.clearRect(0, 0, W, H);
+  const r = f.mw * 0.52;
+  if (S.blush.style === "apple") {
+    softSpot(maskX, L.x, L.y, r, r*0.82, 0, .9);
+    softSpot(maskX, R.x, R.y, r, r*0.82, 0, .9);
+  } else if (S.blush.style === "sweep") {
+    const cL = lerpP(L, TL, 0.42), cR = lerpP(R, TR, 0.42);
+    const aL = Math.atan2(TL.y - L.y, TL.x - L.x), aR = Math.atan2(TR.y - R.y, TR.x - R.x);
+    softSpot(maskX, cL.x, cL.y, r*1.15, r*0.55, aL, .9);
+    softSpot(maskX, cR.x, cR.y, r*1.15, r*0.55, aR, .9);
+  } else {                                                 // 晒伤腮红:贴鼻两团+鼻梁一抹
+    const cL = lerpP(L, NB, 0.3), cR = lerpP(R, NB, 0.3);
+    softSpot(maskX, cL.x, cL.y, r*0.85, r*0.6, 0, .9);
+    softSpot(maskX, cR.x, cR.y, r*0.85, r*0.6, 0, .9);
+    softSpot(maskX, NB.x, NB.y, r*0.55, r*0.22, 0, .7);
+  }
+  compositeMask(S.blush.color.c, 0.55*it, 0.38*it);
+}
+
+/* ---------- 眉妆 ---------- */
+const BROW_L_TOP = [70,63,105,66,107], BROW_L_BOT = [55,65,52,53,46];
+const BROW_R_TOP = [300,293,334,296,336], BROW_R_BOT = [285,295,282,283,276];
+function browPoly(top, bot, f) {
+  let pts = top.map(i => ({ x: S.lm[i].x, y: S.lm[i].y }))
+    .concat(bot.map(i => ({ x: S.lm[i].x, y: S.lm[i].y })));
+  const cx = pts.reduce((a,p)=>a+p.x,0)/pts.length, cy = pts.reduce((a,p)=>a+p.y,0)/pts.length;
+  const h = Math.max(4, Math.abs(S.lm[top[2]].y - S.lm[bot[2]].y));
+  if (S.brow.shape === "bold")
+    pts = pts.map(p => ({ x: cx + (p.x-cx)*1.06, y: cy + (p.y-cy)*1.45 }));
+  if (S.brow.shape === "arch") {                           // 挑眉:尾部上扬(top/bot首元素为外端)
+    pts[0].y -= h*0.7; pts[1].y -= h*0.35;
+    pts[pts.length-1].y -= h*0.55; pts[pts.length-2].y -= h*0.25;
+  }
+  return pts.map(p => [p.x, p.y]);
+}
+function drawBrow(f) {
+  const W = cv.width, H = cv.height, it = S.brow.int;
+  if (!S.lm[70] || !S.lm[300]) return;
+  maskX.clearRect(0, 0, W, H);
+  maskX.save();
+  try { maskX.filter = "blur(2.5px)"; } catch (e) {}
+  maskX.fillStyle = "#fff";
+  for (const pts of [browPoly(BROW_L_TOP, BROW_L_BOT, f), browPoly(BROW_R_TOP, BROW_R_BOT, f)]) {
+    maskX.beginPath(); smoothPath(maskX, pts); maskX.fill();
+  }
+  try { maskX.filter = "none"; } catch (e) {}
+  maskX.restore();
+  compositeMask(S.brow.color.c, 0.30*it, 0.62*it);
+}
+
+/* ---------- 眼影 ---------- */
+const EYE_L = [133,173,157,158,159,160,161,246,33];        // 左上睑弧线(内→外)
+const EYE_R = [362,398,384,385,386,387,388,466,263];
+function eyePoly(arc, f, fromT, toT) {
+  const lash = arc.map(i => ({ x: S.lm[i].x, y: S.lm[i].y }));
+  const n = lash.length, lift = f.mw * 0.30;
+  const seg = lash.slice(Math.round(fromT*(n-1)), Math.round(toT*(n-1)) + 1);
+  const up = seg.map((p, k) => {
+    const t = (k + Math.round(fromT*(n-1))) / (n - 1);
+    return { x: p.x, y: p.y - lift * (0.35 + 0.65 * Math.sin(Math.PI * t)) };
+  });
+  return seg.map(p => [p.x, p.y]).concat(up.reverse().map(p => [p.x, p.y]));
+}
+function shadeDarken(hex, k) {
+  const [r,g,b] = hex2rgbArr(hex);
+  const f2 = v => Math.round(v * (1 - k)).toString(16).padStart(2, "0");
+  return "#" + f2(r) + f2(g) + f2(b);
+}
+function drawEye(f) {
+  const W = cv.width, H = cv.height, it = S.eye.int;
+  if (!S.lm[133] || !S.lm[362]) return;
+  maskX.clearRect(0, 0, W, H);
+  maskX.save();
+  try { maskX.filter = "blur(4px)"; } catch (e) {}
+  maskX.fillStyle = "#fff"; maskX.globalAlpha = 0.9;
+  for (const arc of [EYE_L, EYE_R]) {
+    maskX.beginPath(); smoothPath(maskX, eyePoly(arc, f, 0, 1)); maskX.fill();
+  }
+  try { maskX.filter = "none"; } catch (e) {}
+  maskX.restore();
+  compositeMask(S.eye.color.c, 0.55*it, 0.42*it);
+  if (S.eye.grad) {                                        // 渐变:外眼角加深
+    maskX.clearRect(0, 0, W, H);
+    maskX.save();
+    try { maskX.filter = "blur(5px)"; } catch (e) {}
+    maskX.fillStyle = "#fff"; maskX.globalAlpha = 0.85;
+    maskX.beginPath(); smoothPath(maskX, eyePoly(EYE_L, f, 0.55, 1)); maskX.fill();
+    maskX.beginPath(); smoothPath(maskX, eyePoly(EYE_R, f, 0.55, 1)); maskX.fill();
+    try { maskX.filter = "none"; } catch (e) {}
+    maskX.restore();
+    compositeMask(shadeDarken(S.eye.color.c, 0.32), 0.4*it, 0.5*it);
+  }
+}
+
+/* ---------- 唇妆 ---------- */
+function drawLips(f) {
   const W = cv.width, H = cv.height, i = S.intensity;
 
   // 1) 生成蒙版(白色,带透明度)
@@ -909,6 +1055,8 @@ function setMode(m) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.mode === m));
   const tools = $("tools"); tools.innerHTML = "";
 
+  if (m === "oneclick" || m === "smear" || m === "shape")
+    $("intensity").value = Math.round(S.intensity * 100);
   if (m === "oneclick") {
     S.maskMode = "full";
     tools.innerHTML = `<span class="toolNote">点选色号,口红立刻上唇</span>`;
@@ -928,7 +1076,46 @@ function setMode(m) {
     $("eraserBtn").onclick  = () => { S.eraser = !S.eraser; $("eraserBtn").classList.toggle("on", S.eraser); };
     if (!S.color) hint("先在色板选一支口红,再用手指涂抹");
   }
-  if (m === "wardrobe") {
+  if (m === "blush") {
+    tools.innerHTML = `
+      <button class="chip" data-bs="apple">苹果肌</button>
+      <button class="chip" data-bs="sweep">斜扫显瘦</button>
+      <button class="chip" data-bs="sun">晒伤腮红</button>
+      <span class="toolNote">点色上脸·浓度滑杆可调</span>`;
+    tools.querySelectorAll("[data-bs]").forEach(b => {
+      b.classList.toggle("on", b.dataset.bs === S.blush.style);
+      b.onclick = () => { S.blush.style = b.dataset.bs;
+        tools.querySelectorAll("[data-bs]").forEach(x => x.classList.toggle("on", x === b)); };
+    });
+    renderCatPalette(BLUSH_PAL, "blush");
+    $("intensity").value = Math.round(S.blush.int * 100);
+  } else if (m === "brow") {
+    tools.innerHTML = `
+      <button class="chip" data-bw="natural">原生眉型</button>
+      <button class="chip" data-bw="bold">加粗</button>
+      <button class="chip" data-bw="arch">挑眉</button>
+      <span class="toolNote">染眉色·保留真实眉流</span>`;
+    tools.querySelectorAll("[data-bw]").forEach(b => {
+      b.classList.toggle("on", b.dataset.bw === S.brow.shape);
+      b.onclick = () => { S.brow.shape = b.dataset.bw;
+        tools.querySelectorAll("[data-bw]").forEach(x => x.classList.toggle("on", x === b)); };
+    });
+    renderCatPalette(BROW_PAL, "brow");
+    $("intensity").value = Math.round(S.brow.int * 100);
+  } else if (m === "eye") {
+    tools.innerHTML = `
+      <button class="chip" id="eyeSolid">单色</button>
+      <button class="chip" id="eyeGrad">外眼角渐变</button>
+      <span class="toolNote">眼影晕染在上眼皮</span>`;
+    $("eyeSolid").classList.toggle("on", !S.eye.grad);
+    $("eyeGrad").classList.toggle("on", S.eye.grad);
+    $("eyeSolid").onclick = () => { S.eye.grad = false;
+      $("eyeSolid").classList.add("on"); $("eyeGrad").classList.remove("on"); };
+    $("eyeGrad").onclick = () => { S.eye.grad = true;
+      $("eyeGrad").classList.add("on"); $("eyeSolid").classList.remove("on"); };
+    renderCatPalette(EYE_PAL, "eye");
+    $("intensity").value = Math.round(S.eye.int * 100);
+  } else if (m === "wardrobe") {
     S.maskMode = "full";
     tools.innerHTML = `
       <button class="chip" id="wdAddBtn">＋自定义</button>
@@ -1071,7 +1258,13 @@ function stamp(px, py, r) {
 /* ====================================================================
    底部控件
 ==================================================================== */
-$("intensity").addEventListener("input", e => S.intensity = e.target.value / 100);
+$("intensity").addEventListener("input", e => {
+  const v = e.target.value / 100;
+  if (S.mode === "blush") S.blush.int = v;
+  else if (S.mode === "brow") S.brow.int = v;
+  else if (S.mode === "eye") S.eye.int = v;
+  else S.intensity = v;
+});
 
 $("zoomIn").addEventListener("click", () => {
   const before = S.zoom; setZoom(S.zoom + 0.5);
@@ -1090,8 +1283,9 @@ $("texSeg").querySelectorAll("button").forEach(b => b.addEventListener("click", 
 
 $("clearBtn").addEventListener("click", () => {
   S.color = null; paintX.clearRect(0, 0, PW, PH); paintHasContent = false;
+  S.blush.color = null; S.brow.color = null; S.eye.color = null;
   document.querySelectorAll(".sw").forEach(s => s.classList.remove("on"));
-  hint("已卸妆,挑一支新颜色吧");
+  hint("已全部卸妆(唇·颊·眉·眼)");
 });
 
 const cmp = $("compareBtn");
@@ -1118,6 +1312,39 @@ $("shotBtn").addEventListener("click", () => {
     hint("已保存试妆照");
   }, "image/png");
 });
+
+/* ---------- 品类色板(腮红/眉妆/眼影) ---------- */
+const BLUSH_PAL = [
+  { n:"蜜桃", c:"#F09E8C", t:"warm" }, { n:"珊瑚", c:"#E97F66", t:"warm" },
+  { n:"杏橘", c:"#E8A87C", t:"warm" }, { n:"裸粉棕", c:"#D9967F", t:"neutral" },
+  { n:"玫瑰粉", c:"#E2849B", t:"cool" }, { n:"紫调粉", c:"#C97FB4", t:"cool" }];
+const BROW_PAL = [
+  { n:"自然黑", c:"#3A2E28", t:"neutral" }, { n:"深棕", c:"#4A3526", t:"neutral" },
+  { n:"浅棕", c:"#6F523C", t:"warm" }, { n:"红棕", c:"#5E392C", t:"warm" },
+  { n:"灰棕", c:"#57493F", t:"cool" }];
+const EYE_PAL = [
+  { n:"大地棕", c:"#8A5A3B", t:"warm" }, { n:"砖橘", c:"#B05B3F", t:"warm" },
+  { n:"奶咖", c:"#A9846B", t:"neutral" }, { n:"玫瑰豆沙", c:"#B5707A", t:"neutral" },
+  { n:"灰紫", c:"#837095", t:"cool" }, { n:"酒红", c:"#7E3B47", t:"cool" }];
+
+function renderCatPalette(list, cat) {                     // 通用品类色板渲染
+  const box = $("swatches"); box.innerHTML = "";
+  const match = p => S.tone == null ? false : (p.t === S.tone || p.t === "neutral");
+  const sorted = [...list].sort((a, b) => (match(b) ? 1 : 0) - (match(a) ? 1 : 0));
+  for (const p of sorted) {
+    const el = document.createElement("button");
+    el.className = "sw" + (match(p) ? " rec" : "") +
+      (S[cat].color && S[cat].color.c === p.c ? " on" : "");
+    el.innerHTML = `<span class="dot" style="background:${p.c}"><span class="star">★</span></span><span class="nm">${p.n}</span>`;
+    el.addEventListener("click", () => {
+      S[cat].color = p;
+      document.documentElement.style.setProperty("--accent", p.c);
+      box.querySelectorAll(".sw").forEach(x => x.classList.remove("on"));
+      el.classList.add("on");
+    });
+    box.appendChild(el);
+  }
+}
 
 /* ---------- 衣橱视图 ---------- */
 function renderWardrobe() {
@@ -1188,6 +1415,99 @@ function wdImport(e) {
   rd.readAsText(f); e.target.value = "";
 }
 
+/* 品牌经典色号(色值为参考近似,实物为准) */
+const BRAND_SHADES = [
+  { b: "MAC", items: [
+    ["Ruby Woo 经典正红","#B7202E","matte"],["Chili 小辣椒","#A4493D","matte"],
+    ["Marrakesh 摩洛哥红棕","#9E4938","matte"],["Velvet Teddy 裸棕","#BC7F6C","matte"],
+    ["Mocha 摩卡豆沙","#B26B5E","matte"],["Lady Danger 橘红","#D8472B","matte"]]},
+  { b: "Dior 迪奥", items: [
+    ["999 传奇正红(哑光)","#C5172B","matte"],["999 滋润版","#C9203A","gloss"],
+    ["720 玫瑰豆沙","#A35E62","matte"],["772 经典枫叶","#99474F","matte"],
+    ["080 微笑红(水光)","#C43A47","gloss"]]},
+  { b: "YSL 圣罗兰", items: [
+    ["1966 复古红","#A93B36","matte"],["小金条21 复古胡萝卜","#C04B3F","matte"]]},
+  { b: "Chanel 香奈儿", items: [
+    ["58 Rouge Vie 复古玫瑰红","#8D3A44","matte"],["99 Pirate 海盗红","#B01F30","gloss"]]},
+  { b: "Charlotte Tilbury", items: [
+    ["Pillow Talk 枕边话裸粉","#C98E83","matte"],["Walk of No Shame 玫瑰红","#A93B4A","matte"]]},
+  { b: "NARS", items: [
+    ["Dolce Vita 玫瑰豆沙","#B5717B","matte"],["Cruella 暗调正红","#9C2733","matte"]]},
+  { b: "Armani 阿玛尼", items: [
+    ["红管405 番茄红","#B3242E","matte"],["红管206 枫叶红棕","#C25B4C","matte"]]},
+  { b: "Tom Ford", items: [
+    ["16 Scarlet Rouge 猩红","#B11F31","matte"],["80 Impassioned 玫红","#BE3A53","matte"]]},
+  { b: "Lanc\u00f4me 兰蔻", items: [
+    ["196 经典红","#B62A35","matte"],["274 复古浆果","#8F3743","matte"]]},
+];
+(function initBrandSel() {
+  const sel = $("wdBrandSel");
+  BRAND_SHADES.forEach((g, gi) => {
+    const og = document.createElement("optgroup"); og.label = g.b;
+    g.items.forEach((it, ii) => {
+      const o = document.createElement("option");
+      o.value = gi + "," + ii; o.textContent = it[0];
+      og.appendChild(o);
+    });
+    sel.appendChild(og);
+  });
+  sel.addEventListener("change", () => {
+    if (!sel.value) return;
+    const [gi, ii] = sel.value.split(",").map(Number);
+    const g = BRAND_SHADES[gi], it = g.items[ii];
+    $("wdName").value = (g.b.split(" ")[0] + " " + it[0]).slice(0, 20);
+    $("wdColor").value = it[1];
+    $("wdTex").querySelectorAll("button").forEach(x =>
+      x.classList.toggle("on", x.dataset.t === it[2]));
+  });
+})();
+
+/* 照片取色:在口红色相域(红橙~品红)里找出现最多的颜色 */
+function pickLipColorFromImage(img) {
+  const c = document.createElement("canvas");
+  const sc = Math.min(1, 220 / Math.max(img.width, img.height));
+  c.width = Math.max(1, Math.round(img.width * sc));
+  c.height = Math.max(1, Math.round(img.height * sc));
+  const x = c.getContext("2d");
+  x.drawImage(img, 0, 0, c.width, c.height);
+  const d = x.getImageData(0, 0, c.width, c.height).data;
+  const bins = {};
+  for (let k = 0; k < d.length; k += 4) {
+    const r = d[k], g = d[k+1], b = d[k+2];
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    if (!mx) continue;
+    const sat = (mx - mn) / mx, l = (mx + mn) / 510;
+    if (sat < 0.28 || l < 0.12 || l > 0.88) continue;
+    let h; const df = mx - mn || 1;
+    if (mx === r) h = ((g - b) / df) % 6; else if (mx === g) h = (b - r) / df + 2; else h = (r - g) / df + 4;
+    h = (h * 60 + 360) % 360;
+    if (!(h <= 50 || h >= 300)) continue;
+    const key = (r >> 4) + "," + (g >> 4) + "," + (b >> 4);
+    if (!bins[key]) bins[key] = [0, 0, 0, 0];
+    const bn = bins[key]; bn[0]++; bn[1] += r; bn[2] += g; bn[3] += b;
+  }
+  let top = null;
+  for (const k in bins) if (!top || bins[k][0] > top[0]) top = bins[k];
+  if (!top || top[0] < 8) return null;
+  const hx = v => Math.round(v / top[0]).toString(16).padStart(2, "0");
+  return "#" + hx(top[1]) + hx(top[2]) + hx(top[3]);
+}
+$("wdPhotoFile").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const col = pickLipColorFromImage(img);
+      if (col) { $("wdColor").value = col; hint("已从照片提取口红色,可在色块上微调"); }
+      else hint("照片里没找到明显的口红色,换张更清晰的试试");
+    };
+    img.src = rd.result;
+  };
+  rd.readAsDataURL(f); e.target.value = "";
+});
+
 /* 衣橱录入弹窗 */
 $("wdTex").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
   $("wdTex").querySelectorAll("button").forEach(x => x.classList.remove("on"));
@@ -1243,6 +1563,13 @@ $("toneSave").addEventListener("click", () => {
 });
 
 /* 初始 */
+window.__msDebug = () => ({
+  lm: S.lm ? { cheekL: [S.lm[205].x, S.lm[205].y], cheekR: [S.lm[425].x, S.lm[425].y],
+    browL: [S.lm[105].x, S.lm[105].y], browR: [S.lm[334].x, S.lm[334].y],
+    eyeL: [S.lm[159].x, S.lm[159].y], eyeR: [S.lm[386].x, S.lm[386].y],
+    mw: Math.hypot(S.lm[291].x - S.lm[61].x, S.lm[291].y - S.lm[61].y) } : null,
+  W: cv.width, H: cv.height });
+
 buildSwatches();
 setMode("oneclick");
 </script>
