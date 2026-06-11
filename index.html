@@ -155,6 +155,29 @@
   #toneModal .grpT { font-size: 12px; color: var(--muted); text-align: left; margin: 16px 0 8px; }
   #toneSave { width: 100%; margin-top: 20px; padding: 12px 0; border-radius: 12px;
     background: var(--accent); color: #fff; font-size: 15px; }
+  #wdModal { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.65);
+    display: none; align-items: center; justify-content: center; padding: 22px; }
+  #wdModal.show { display: flex; }
+  #wdModal .box { background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    padding: 22px; width: 100%; max-width: 340px; text-align: center; }
+  #wdModal h3 { font-size: 16px; font-weight: 600; }
+  #wdModal .grpT { font-size: 12px; color: var(--muted); text-align: left; margin: 14px 0 7px; }
+  #wdModal .opts { display: flex; gap: 8px; }
+  #wdModal .opts button { flex: 1; padding: 10px 0; border-radius: 12px; font-size: 13px;
+    border: 1px solid var(--line); color: var(--muted); }
+  #wdModal .opts button.on { border-color: var(--accent); color: var(--accent); font-weight: 500; }
+  #wdName { width: 100%; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line);
+    background: rgba(255,255,255,.06); color: var(--txt); font-size: 14px; font-family: inherit; }
+  #wdColor { width: 100%; height: 46px; padding: 4px; border-radius: 12px;
+    border: 1px solid var(--line); background: rgba(255,255,255,.06); }
+  #wdSave { width: 100%; margin-top: 20px; padding: 12px 0; border-radius: 12px;
+    background: var(--accent); color: #fff; font-size: 15px; }
+  .sw .tex { position: absolute; bottom: -2px; right: -2px; width: 12px; height: 12px;
+    border-radius: 50%; background: linear-gradient(135deg, #fff 0 50%, transparent 50%);
+    opacity: .85; display: none; }
+  .sw.gloss .tex { display: block; }
+  .sw.add .dot { background: none; border: 1.5px dashed var(--muted); color: var(--muted);
+    font-size: 20px; line-height: 33px; text-align: center; }
 </style>
 </head>
 <body>
@@ -166,7 +189,7 @@
   <button id="startBtn">开启镜子</button>
   <div class="privacy">所有画面仅在本机处理,不会离开你的手机</div>
   <div id="loadMsg"></div>
-  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v1.6</div>
+  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v2.0</div>
 </div>
 
 <video id="video" playsinline muted autoplay></video>
@@ -192,10 +215,11 @@
 <div id="helpModal">
   <div class="box">
     <h3>镜色 · 怎么玩</h3>
-    <div class="hRow"><b>★ 是什么</b>打开镜子时已自动分析你的肤色,色板里带 ★ 的色号是为你挑的显白色。</div>
+    <div class="hRow"><b>★ 是什么</b>打开镜子时已自动分析你的肤色,色板里带 ★ 的色号是依据你的肤色挑选的推荐色。</div>
     <div class="hRow"><b>一键试色</b>点任意色号,口红立刻上唇,适合快速挑色。</div>
     <div class="hRow"><b>亲手上妆</b>用手指在屏幕里的嘴唇上来回涂抹,越涂越浓;涂出界会自动裁掉,不会画花;可换"卸妆棉"局部擦掉。</div>
     <div class="hRow"><b>唇型</b>拖动白色圆点改唇形,或点微笑唇/嘟嘟唇等预设。</div>
+    <div class="hRow"><b>口红衣橱</b>长按色板任意色号收藏进衣橱;"衣橱"页签里管理和试涂;再选相近颜色时会提醒撞色,买前查重。</div>
     <div class="hRow"><b>小手势</b>右上 +/− 调画面大小,双指张开放大、捏合缩小(摄像头太近时缩小看全脸,四周自动以模糊背景填充);按住"按住对比"看素颜;不满意点 Clear 重来。</div>
     <div class="hRow"><b>隐私</b>所有画面只在你的手机上处理,不会上传。</div>
     <button class="chip solid" id="helpClose" style="margin-top:14px;width:100%;padding:11px 0;">知道了,开始试妆</button>
@@ -207,6 +231,7 @@
     <button class="tab on" data-mode="oneclick">一键试色</button>
     <button class="tab" data-mode="smear">亲手上妆</button>
     <button class="tab" data-mode="shape">唇型</button>
+    <button class="tab" data-mode="wardrobe">衣橱</button>
     <button id="shotBtn" title="拍照保存" aria-label="拍照保存"></button>
   </div>
 
@@ -228,10 +253,26 @@
   </div>
 </div>
 
+<div id="wdModal">
+  <div class="box">
+    <h3>添加一支口红</h3>
+    <div class="grpT">名称(如:MAC Chili / 我的砖红)</div>
+    <input type="text" id="wdName" maxlength="20" placeholder="给它起个名字">
+    <div class="grpT">颜色</div>
+    <input type="color" id="wdColor" value="#C2152E">
+    <div class="grpT">质地</div>
+    <div class="opts" id="wdTex">
+      <button data-t="matte" class="on">哑光</button>
+      <button data-t="gloss">水光</button>
+    </div>
+    <button id="wdSave">保存到衣橱</button>
+  </div>
+</div>
+
 <div id="toneModal">
   <div class="box">
     <h3>修改肤色信息</h3>
-    <p>小技巧:手腕血管偏蓝紫是冷调,偏青绿是暖调;<br>戴银饰更显白是冷调,金饰更显白是暖调。</p>
+    <p>小技巧:手腕血管偏蓝紫是冷调,偏青绿是暖调;<br>更适合银饰是冷调,更适合金饰是暖调。</p>
     <div class="grpT">色调</div>
     <div class="opts" id="toneOpts">
       <button data-tone="cool">冷调</button>
@@ -314,7 +355,7 @@ const S = {
   painting: false,
   lastPaint: null,
   tone: null, depth: null,  // 肤色分析结果
-  samples: [], sampleSkip: 0,
+  samples: [], sampleSkip: 0, lipSamples: [], lipL: 60,
   base: null,               // 平滑后的关键点(未缩放的基准坐标)
   zoom: 1, zc: null,        // 数字变焦倍率 / 变焦中心(跟随面部)
   pinch: null, prevMode: null,
@@ -630,10 +671,17 @@ function drawMakeup(f) {
   maskX.fillStyle = S.color.c; maskX.fillRect(0, 0, W, H);
   maskX.restore();
 
-  // 3) 合成到画面:color 换色保留唇纹 + multiply 加深
+  // 3) 合成到画面:color 换色保留唇纹 + multiply 加深 + 深唇基底补偿
+  // dk=唇色基底深度(0浅唇~1深唇):深唇时薄涂保留基底暗调,厚涂增加颜料遮盖、减弱加深
+  const dk = clamp((55 - S.lipL) / 35, 0, 1);
   ctx.save();
   ctx.globalCompositeOperation = "color";    ctx.globalAlpha = 0.78 * i; ctx.drawImage(maskC, 0, 0);
-  ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = 0.50 * i; ctx.drawImage(maskC, 0, 0);
+  ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = 0.50 * i * (1 - 0.55 * dk); ctx.drawImage(maskC, 0, 0);
+  if (dk > 0.02) {
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 0.38 * i * i * dk;                   // i平方:薄涂几乎不遮盖,厚涂遮盖明显
+    ctx.drawImage(maskC, 0, 0);
+  }
   ctx.restore();
 
   // 4) 水光质地:下唇高光
@@ -703,6 +751,17 @@ function sampleSkin() {
   }
   if (!n) return;
   S.samples.push([r / n, g / n, b / n]);
+  // 同步采样唇部基底色(上下唇中心),用于深唇显色补偿
+  try {
+    const lo = S.lm[17], li = S.lm[14], uo = S.lm[0], ui = S.lm[13];
+    for (const [a, b2] of [[lo, li], [uo, ui]]) {
+      const cx = Math.round((a.x + b2.x) / 2), cy = Math.round((a.y + b2.y) / 2);
+      const d = ctx.getImageData(cx - 2, cy - 2, 4, 4).data;
+      let lr = 0, lg = 0, lb = 0, ln = 0;
+      for (let k = 0; k < d.length; k += 4) { lr += d[k]; lg += d[k+1]; lb += d[k+2]; ln++; }
+      S.lipSamples.push([lr / ln, lg / ln, lb / ln]);
+    }
+  } catch (e) {}
   if (S.samples.length < 36) {
     if (S.samples.length % 9 === 0) hint(`正在分析你的肤色… ${Math.round(S.samples.length / 36 * 100)}%`, true);
     return;
@@ -716,6 +775,11 @@ function sampleSkin() {
   const ita = Math.atan2(lab.L - 50, lab.b) * 180 / Math.PI;  // ITA°:皮肤深浅
   S.tone = hue >= 53 ? "warm" : hue <= 45 ? "cool" : "neutral";
   S.depth = ita > 41 ? "白皙" : ita > 28 ? "自然" : ita > 10 ? "小麦" : "深肤";
+  if (S.lipSamples.length >= 6) {                          // 唇部基底亮度(深唇显色补偿用)
+    const m = S.lipSamples.reduce((a, v) => [a[0]+v[0], a[1]+v[1], a[2]+v[2]], [0,0,0])
+      .map(v => v / S.lipSamples.length);
+    S.lipL = rgb2lab(m[0], m[1], m[2]).L;
+  }
   finishAnalysis();
 }
 function rgb2lab(r, g, b) {
@@ -735,9 +799,9 @@ function finishAnalysis() {
 }
 function toneText() {
   const d = S.depth ? `·${S.depth}肤色` : "";
-  if (S.tone === "warm") return `你是暖皮(肤色偏黄调)${d}。涂橘红、砖红这类暖色更显白,下方带 ★ 的就是为你挑的`;
-  if (S.tone === "cool") return `你是冷皮(肤色偏粉调)${d}。涂玫红、浆果这类冷色更显白,下方带 ★ 的就是为你挑的`;
-  return `你是中性皮${d},冷暖色都能驾驭。下方带 ★ 的是百搭显白色`;
+  if (S.tone === "warm") return `你是暖皮(肤色偏黄调)${d}。涂橘红、砖红这类暖色更衬你,下方带 ★ 的就是为你挑的`;
+  if (S.tone === "cool") return `你是冷皮(肤色偏粉调)${d}。涂玫红、浆果这类冷色更衬你,下方带 ★ 的就是为你挑的`;
+  return `你是中性皮${d},冷暖色都能驾驭。下方带 ★ 的是百搭推荐色`;
 }
 const TONE_BADGE = { warm: "暖皮", cool: "冷皮", neutral: "中性" };
 function applyTone() {
@@ -749,6 +813,52 @@ function applyTone() {
 /* ====================================================================
    色板
 ==================================================================== */
+/* ====================================================================
+   口红衣橱:本地存储 / 撞色预警(Lab ΔE) / 录入与管理
+==================================================================== */
+const WD_KEY = "mirrorshade_wardrobe_v1";
+let WD = [];
+function wdLoad() {
+  try { const r = localStorage.getItem(WD_KEY); WD = r ? JSON.parse(r) : []; }
+  catch (e) { WD = []; }
+  if (!Array.isArray(WD)) WD = [];
+}
+function wdSave() { try { localStorage.setItem(WD_KEY, JSON.stringify(WD)); } catch (e) {} }
+function wdAdd(item) {
+  if (WD.some(w => w.color.toLowerCase() === item.color.toLowerCase() && w.texture === item.texture)) {
+    hint(`「${item.name}」已经在你的衣橱里了`); return false;
+  }
+  WD.push({ id: "w" + Date.now() + Math.floor(Math.random() * 1e4),
+    name: item.name, brand: item.brand || "", shadeCode: item.shadeCode || "",
+    color: item.color, texture: item.texture || "matte", addedAt: Date.now() });
+  wdSave(); return true;
+}
+function hex2rgbArr(h) { const n = parseInt(h.slice(1), 16); return [(n>>16)&255, (n>>8)&255, n&255]; }
+function deltaE(c1, c2) {                                  // Lab 空间 ΔE76 色差
+  const [r1,g1,b1] = hex2rgbArr(c1), [r2,g2,b2] = hex2rgbArr(c2);
+  const A = rgb2lab(r1,g1,b1), B = rgb2lab(r2,g2,b2);
+  return Math.hypot(A.L-B.L, A.a-B.a, A.b-B.b);
+}
+function wdDupe(color, texture) {                          // 衣橱中最相似的一支
+  let best = null;
+  for (const w of WD) {
+    let d = deltaE(color, w.color);
+    if (w.texture !== texture) d += 4;                     // 质地不同,相似度打折
+    if (!best || d < best.d) best = { item: w, d };
+  }
+  return best;
+}
+function wdWarnIfDupe(color, texture) {
+  const m = wdDupe(color, texture);
+  if (!m) return;
+  if (m.d < 1.5) hint(`这支已经在你的衣橱里(「${m.item.name}」)`);
+  else if (m.d <= 12) {
+    const sim = Math.max(60, Math.round(100 - m.d * 2.5));
+    hint(`⚠ 与你衣橱的「${m.item.name}」相似度约 ${sim}%,买前想一想~`);
+  }
+}
+wdLoad();
+
 function buildSwatches() {
   const box = $("swatches"); box.innerHTML = "";
   const match = p => S.tone == null ? false : (p.t === S.tone || p.t === "neutral");
@@ -763,9 +873,27 @@ function buildSwatches() {
       box.querySelectorAll(".sw").forEach(s => s.classList.remove("on"));
       el.classList.add("on");
       if (S.mode === "smear" && paintEmpty()) hint("用手指在嘴唇上来回涂抹,反复叠涂颜色会更浓");
+      else wdWarnIfDupe(p.c, S.texture);                   // 撞色预警
+    });
+    attachLongPress(el, () => {                            // 长按色板:收藏入衣橱
+      if (wdAdd({ name: p.n, color: p.c, texture: S.texture }))
+        hint(`已把「${p.n}」放进你的衣橱`);
     });
     box.appendChild(el);
   }
+}
+function attachLongPress(el, fn) {
+  let timer = null, sx = 0, sy = 0;
+  const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  el.addEventListener("pointerdown", e => {
+    sx = e.clientX; sy = e.clientY;
+    timer = setTimeout(() => { timer = null; fn(); }, 550);
+  });
+  el.addEventListener("pointermove", e => {
+    if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) clear();
+  });
+  ["pointerup", "pointerleave", "pointercancel"].forEach(ev => el.addEventListener(ev, clear));
+  el.addEventListener("contextmenu", e => e.preventDefault());
 }
 let paintHasContent = false;
 function paintEmpty() { return !paintHasContent; }
@@ -799,6 +927,21 @@ function setMode(m) {
     $("brushSmall").onclick = () => setBrush("small");
     $("eraserBtn").onclick  = () => { S.eraser = !S.eraser; $("eraserBtn").classList.toggle("on", S.eraser); };
     if (!S.color) hint("先在色板选一支口红,再用手指涂抹");
+  }
+  if (m === "wardrobe") {
+    S.maskMode = "full";
+    tools.innerHTML = `
+      <button class="chip" id="wdAddBtn">＋自定义</button>
+      <button class="chip" id="wdExport">导出</button>
+      <label class="chip" style="display:inline-flex;align-items:center;">导入<input type="file" id="wdImportFile" accept=".json" style="display:none"></label>
+      <span class="toolNote">长按色板收藏·长按衣橱删除</span>`;
+    $("wdAddBtn").onclick = openWdModal;
+    $("wdExport").onclick = wdExport;
+    $("wdImportFile").onchange = wdImport;
+    renderWardrobe();
+    if (!WD.length) hint("衣橱还是空的:长按色板里的色号,或点＋自定义录入");
+  } else {
+    buildSwatches();
   }
   if (m === "shape") {
     tools.innerHTML = `
@@ -975,6 +1118,92 @@ $("shotBtn").addEventListener("click", () => {
     hint("已保存试妆照");
   }, "image/png");
 });
+
+/* ---------- 衣橱视图 ---------- */
+function renderWardrobe() {
+  const box = $("swatches"); box.innerHTML = "";
+  const addBtn = document.createElement("button");
+  addBtn.className = "sw add";
+  addBtn.innerHTML = `<span class="dot">＋</span><span class="nm">添加</span>`;
+  addBtn.addEventListener("click", openWdModal);
+  box.appendChild(addBtn);
+  for (const w of WD) {
+    const el = document.createElement("button");
+    el.className = "sw" + (w.texture === "gloss" ? " gloss" : "") +
+      (S.color && S.color.c.toLowerCase() === w.color.toLowerCase() ? " on" : "");
+    el.innerHTML = `<span class="dot" style="background:${w.color}"><span class="tex"></span></span><span class="nm">${w.name}</span>`;
+    el.addEventListener("click", () => {
+      S.color = { n: w.name, c: w.color, t: "neutral" };
+      S.maskMode = "full";
+      S.texture = w.texture;
+      $("texSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x.dataset.tex === w.texture));
+      document.documentElement.style.setProperty("--accent", w.color);
+      box.querySelectorAll(".sw").forEach(x => x.classList.remove("on"));
+      el.classList.add("on");
+    });
+    attachLongPress(el, () => {
+      if (confirm(`把「${w.name}」从衣橱删除?`)) {
+        WD = WD.filter(x => x.id !== w.id); wdSave(); renderWardrobe();
+        hint(`已删除「${w.name}」`);
+      }
+    });
+    box.appendChild(el);
+  }
+}
+function openWdModal() {
+  $("wdName").value = "";
+  $("wdModal").classList.add("show");
+}
+
+function wdExport() {
+  if (!WD.length) { hint("衣橱是空的,先收藏几支吧"); return; }
+  const blob = new Blob([JSON.stringify({ app: "MirrorShade", v: 1, items: WD }, null, 2)],
+    { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "我的口红衣橱.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  hint(`已导出 ${WD.length} 支口红`);
+}
+function wdImport(e) {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const data = JSON.parse(rd.result);
+      const items = Array.isArray(data) ? data : (data.items || []);
+      let added = 0;
+      for (const it of items) {
+        if (it && /^#[0-9a-fA-F]{6}$/.test(it.color) && it.name) {
+          if (wdAdd({ name: String(it.name).slice(0, 20), color: it.color,
+            texture: it.texture === "gloss" ? "gloss" : "matte",
+            brand: it.brand, shadeCode: it.shadeCode })) added++;
+        }
+      }
+      renderWardrobe();
+      hint(added ? `成功导入 ${added} 支口红` : "没有可导入的新口红");
+    } catch (err) { hint("导入失败:文件格式不对"); }
+  };
+  rd.readAsText(f); e.target.value = "";
+}
+
+/* 衣橱录入弹窗 */
+$("wdTex").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+  $("wdTex").querySelectorAll("button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+}));
+$("wdSave").addEventListener("click", () => {
+  const name = $("wdName").value.trim() || "未命名口红";
+  const color = $("wdColor").value;
+  const tex = $("wdTex").querySelector(".on").dataset.t;
+  if (wdAdd({ name, color, texture: tex })) {
+    $("wdModal").classList.remove("show");
+    renderWardrobe();
+    hint(`「${name}」已放进衣橱`);
+  }
+});
+$("wdModal").addEventListener("click", e => { if (e.target === $("wdModal")) $("wdModal").classList.remove("show"); });
 
 /* 帮助说明 */
 $("helpBtn").addEventListener("click", () => $("helpModal").classList.add("show"));
