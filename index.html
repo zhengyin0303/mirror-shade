@@ -1740,6 +1740,8 @@ window.__msDebug = () => ({
   lm: S.lm ? { cheekL: [S.lm[205].x, S.lm[205].y], cheekR: [S.lm[425].x, S.lm[425].y],
     browL: [S.lm[105].x, S.lm[105].y], browR: [S.lm[334].x, S.lm[334].y],
     eyeL: [S.lm[159].x, S.lm[159].y], eyeR: [S.lm[386].x, S.lm[386].y],
+    eyeCornerL: [S.lm[33].x, S.lm[33].y], eyeCornerR: [S.lm[263].x, S.lm[263].y],
+    lipB: [(S.lm[17].x + S.lm[14].x) / 2, (S.lm[17].y + S.lm[14].y) / 2],   // 下唇带中点
     mw: Math.hypot(S.lm[291].x - S.lm[61].x, S.lm[291].y - S.lm[61].y) } : null,
   W: cv.width, H: cv.height });
 
