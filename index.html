@@ -69,6 +69,8 @@
   #flash { position: absolute; inset: 0; background: #fff; opacity: 0;
     pointer-events: none; transition: opacity .12s; z-index: 5; }
   #flash.show { opacity: .85; transition: none; }
+  #dbgCv { position: absolute; inset: 0; margin: auto; pointer-events: none;
+    z-index: 3; display: none; }   /* v3.2.1-⑥:调试叠加独立画布,关闭时零开销 */
   #zoomIn, #zoomOut { position: absolute; right: 12px; width: 44px; height: 44px;
     border-radius: 50%; background: rgba(16,15,14,.72); backdrop-filter: blur(8px);
     color: var(--txt); font-size: 20px; border: 1px solid var(--line); }
@@ -209,7 +211,7 @@
   <button id="startBtn">开启镜子</button>
   <div class="privacy">所有画面仅在本机处理,不会离开你的手机</div>
   <div id="loadMsg"></div>
-  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v3.2</div>
+  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v3.2.1</div>
 </div>
 
 <video id="video" playsinline muted autoplay></video>
@@ -227,6 +229,7 @@
   <button id="skinBadge" aria-label="查看肤色结果">暖皮</button>
   <div id="compareTag">素 颜</div>
   <div id="flash"></div>
+  <canvas id="dbgCv"></canvas>
   <button id="shotBtn" title="拍照保存" aria-label="拍照保存"></button>
   <button id="zoomIn" aria-label="放大">＋</button>
   <span id="zoomVal">1x</span>
@@ -396,6 +399,33 @@ const $ = id => document.getElementById(id);
 const video = $("video"), cv = $("view"), ctx = cv.getContext("2d");
 const maskC = document.createElement("canvas"), maskX = maskC.getContext("2d");
 const glossC = document.createElement("canvas"), glossX = glossC.getContext("2d");
+/* v3.2.1-⑥:品类蒙版缓存——锚点签名+状态rev判脏,干净帧只合成不重建 */
+const catM = {}, catMX = {};
+for (const k of ["lip", "blush", "brow", "eye"]) {
+  catM[k] = document.createElement("canvas");
+  catMX[k] = catM[k].getContext("2d");
+}
+const catSig = { lip: "", blush: "", brow: "", eye: "" };
+const REV = { lip: 0, blush: 0, brow: 0, eye: 0 };
+function bumpRev(key) { if (REV[key] !== undefined) REV[key]++; }
+function anchorSig(ids) {                                // 锚点量化0.5px拼签名
+  let s = "";
+  for (const id of ids) { const p = sp(id) || (S.lm && S.lm[id]);
+    if (p) s += Math.round(p.x * 2) + "," + Math.round(p.y * 2) + ";"; }
+  return s;
+}
+const SIG_IDS = {
+  lip:   [61, 291, 0, 17, 13, 14, 78, 308],
+  blush: [205, 425, 234, 454, 195, 50, 101, 280, 330],
+  brow:  [70, 63, 105, 66, 107, 55, 65, 52, 53, 46, 300, 293, 334, 296, 336, 285, 295, 282, 283, 276],
+  eye:   [133, 157, 159, 161, 33, 362, 384, 386, 388, 263, 55, 52, 46, 285, 282, 276],
+};
+function maskDirty(key) {                                // 脏=锚点动了或状态变了;干净返回false并复用缓存
+  const sig = anchorSig(SIG_IDS[key]) + "|" + REV[key];
+  if (catSig[key] === sig) return false;
+  catSig[key] = sig;
+  return true;
+}
 const FILTER_OK = (() => { try { const c = document.createElement("canvas").getContext("2d");
   c.filter = "blur(2px)"; return c.filter.indexOf("blur") >= 0; } catch (e) { return false; } })();
 
@@ -475,6 +505,10 @@ function relayout() {
   const W = Math.min(810, stW * 2);                        // 内部分辨率(约2x密度,上限810)
   cv.width = Math.round(W); cv.height = Math.round(W * stH / stW);
   maskC.width = glossC.width = cv.width; maskC.height = glossC.height = cv.height;
+  for (const k in catM) { catM[k].width = cv.width; catM[k].height = cv.height;
+    catSig[k] = ""; bumpRev(k); }                          // 尺寸变化:品类蒙版缓存全脏
+  if (DEBUG) { dbgCv.width = cv.width; dbgCv.height = cv.height;
+    dbgCv.style.width = stW + "px"; dbgCv.style.height = stH + "px"; }
   computeVidFit();
   S.base = null;                                           // 坐标系变了,关键点重新平滑
 }
@@ -667,36 +701,42 @@ function render() {
   smoothAnchors();                                       // v3.1-A:品类锚点二次平滑
   drawMakeup(f);
   if (S.cat === "lip" && S.lip.mode === "shape" && S.compare !== "lip") drawShapeUI(f);
-  if (DEBUG) drawDebug(f);                               // v3.2-§3:?debug=1 调试叠加
+  if (DEBUG) {                                           // v3.2.1-⑥:fps统计先行,叠加开销剥离
+    tickFps();
+    if ((dbgFrameN = (dbgFrameN + 1) % 2) === 0) drawDebug(f);   // 独立画布,隔帧重绘
+  }
 }
 
 /* ---------- v3.2-§3 调试模式:蒙版轮廓 + 锚点 + 帧率(?debug=1) ---------- */
 const DEBUG = new URLSearchParams(location.search).get("debug") === "1";
-let dbgFrames = [];
-function dbgStroke(pts, color, close) {
-  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
-  ctx.beginPath();
-  pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
-  if (close !== false) ctx.closePath();
-  ctx.stroke(); ctx.restore();
-}
-function dbgDot(p, color) {
-  ctx.save(); ctx.fillStyle = color;
-  ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-}
-function drawDebug(f) {
-  // 帧率(30帧滚动均值)
+const dbgCv = $("dbgCv"), dbgX = dbgCv.getContext("2d");
+if (DEBUG) dbgCv.style.display = "block";
+let dbgFrames = [], dbgFrameN = 0;
+function tickFps() {                                     // 30帧滚动均值,只计应用本体帧时间
   const now = performance.now();
   dbgFrames.push(now);
   if (dbgFrames.length > 30) dbgFrames.shift();
-  const fps = dbgFrames.length > 1
+  window.__msFps = dbgFrames.length > 1
     ? Math.round(1000 * (dbgFrames.length - 1) / (now - dbgFrames[0])) : 0;
-  window.__msFps = fps;
-  ctx.save();
-  ctx.font = "bold 26px monospace"; ctx.fillStyle = "#0f0";
-  ctx.textAlign = "right";                                 // v3.2.1-⑦:右上角,避让缩放钮(占内部约120px)
-  ctx.fillText(fps + " fps", cv.width - 130, 80);
-  ctx.restore();
+}
+function dbgStroke(pts, color, close) {
+  dbgX.save(); dbgX.strokeStyle = color; dbgX.lineWidth = 1.5; dbgX.setLineDash([4, 3]);
+  dbgX.beginPath();
+  pts.forEach(([x, y], i) => i ? dbgX.lineTo(x, y) : dbgX.moveTo(x, y));
+  if (close !== false) dbgX.closePath();
+  dbgX.stroke(); dbgX.restore();
+}
+function dbgDot(p, color) {
+  dbgX.save(); dbgX.fillStyle = color;
+  dbgX.beginPath(); dbgX.arc(p.x, p.y, 3.5, 0, Math.PI * 2); dbgX.fill(); dbgX.restore();
+}
+function drawDebug(f) {
+  dbgX.clearRect(0, 0, dbgCv.width, dbgCv.height);
+  dbgX.save();
+  dbgX.font = "bold 26px monospace"; dbgX.fillStyle = "#0f0";
+  dbgX.textAlign = "right";                                // v3.2.1-⑦:右上角,避让缩放钮(占内部约120px)
+  dbgX.fillText((window.__msFps || 0) + " fps", dbgCv.width - 130, 80);
+  dbgX.restore();
   // 唇:外+内环(红)
   dbgStroke(ringPts(OUTER, f, 1), "#FF4D4D");
   dbgStroke(ringPts(INNER, f, 0.5), "#FF4D4D");
@@ -731,13 +771,19 @@ function drawMakeup(f) {
 }
 
 /* ---------- 通用蒙版着色合成 ---------- */
-function compositeMask(color, aColor, aMul) {
-  maskX.save(); maskX.globalCompositeOperation = "source-in";
-  maskX.fillStyle = color; maskX.fillRect(0, 0, cv.width, cv.height); maskX.restore();
+function tintMask(mx2, color) {                          // 蒙版染色(染色结果一并缓存)
+  mx2.save(); mx2.globalCompositeOperation = "source-in";
+  mx2.fillStyle = color; mx2.fillRect(0, 0, cv.width, cv.height); mx2.restore();
+}
+function compositeFrom(mc, aColor, aMul) {               // 从(缓存)蒙版合成到画面
   ctx.save();
-  ctx.globalCompositeOperation = "color";    ctx.globalAlpha = aColor; ctx.drawImage(maskC, 0, 0);
-  ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = aMul;   ctx.drawImage(maskC, 0, 0);
+  ctx.globalCompositeOperation = "color";    ctx.globalAlpha = aColor; ctx.drawImage(mc, 0, 0);
+  ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = aMul;   ctx.drawImage(mc, 0, 0);
   ctx.restore();
+}
+function compositeMask(color, aColor, aMul) {            // scratch 路径(眼影渐变等不缓存的蒙版)
+  tintMask(maskX, color);
+  compositeFrom(maskC, aColor, aMul);
 }
 function softSpot(c, x, y, rx, ry, rot, a) {              // 柔边椭圆光斑
   c.save(); c.translate(x, y); c.rotate(rot || 0); c.scale(1, ry / rx);
@@ -761,7 +807,7 @@ function blushShimmer(f, it) {                            // 微闪:强度=唇�
   for (const P of [sp(205), sp(425)])
     wideGlow(glossX, P.x, P.y, f.mw * 0.50, f.mw * 0.40, 0.8);
   glossX.save(); glossX.globalCompositeOperation = "destination-in";
-  glossX.drawImage(maskC, 0, 0); glossX.restore();
+  glossX.drawImage(catM.blush, 0, 0); glossX.restore();
   ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.275 * it;
   ctx.drawImage(glossC, 0, 0); ctx.restore();
 }
@@ -774,7 +820,7 @@ function eyePearl(f, it) {                                // 珠光:强度介于
     wideGlow(glossX, P.x, P.y - lift, f.mw * 0.30, f.mw * 0.14, 0.85);
   }
   glossX.save(); glossX.globalCompositeOperation = "destination-in";
-  glossX.drawImage(maskC, 0, 0); glossX.restore();
+  glossX.drawImage(catM.eye, 0, 0); glossX.restore();
   ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.40 * it;
   ctx.drawImage(glossC, 0, 0); ctx.restore();
 }
@@ -837,6 +883,7 @@ function fieldNodes(key, f) {
   return eyeFieldNodes();
 }
 function fieldStroke(key, x, y, frame) {                 // 触点向周边顶点高斯累加
+  bumpRev(key);
   const F = FIELD[key];
   F.nodes = fieldNodes(key, key === "lip" ? mouthFrame() : frame);
   const rb = (S.brush === "big" ? 56 : 30) / 512 * BRUSH_SCALE[key] * frame.mw;
@@ -856,22 +903,22 @@ function fieldStroke(key, x, y, frame) {                 // 触点向周边顶�
   if (S.eraser) { let h = false; for (const d of F.dens) if (d > 0.01) { h = true; break; } F.has = h; }
   else if (any) F.has = true;
 }
-function drawField(key, f, clip) {                       // 按当帧顶点位置重建蒙版(画入 maskC)
+function drawField(key, f, clip, mx2) {                  // 按当帧顶点位置重建蒙版(画入指定蒙版画布)
   const F = FIELD[key];
   F.nodes = fieldNodes(key, f);
-  maskX.save();
-  clip();
+  mx2.save();
+  clip(mx2);
   for (let i = 0; i < F.nodes.length; i++) {
     const d = F.dens[i]; if (d < 0.01) continue;
     const [x, y, br] = F.nodes[i];
-    const g = maskX.createRadialGradient(x, y, 0, x, y, br);
+    const g = mx2.createRadialGradient(x, y, 0, x, y, br);
     g.addColorStop(0, `rgba(255,255,255,${Math.min(1, d)})`);
     g.addColorStop(0.65, `rgba(255,255,255,${d * 0.55})`);
     g.addColorStop(1, "rgba(255,255,255,0)");
-    maskX.fillStyle = g;
-    maskX.beginPath(); maskX.arc(x, y, br, 0, Math.PI * 2); maskX.fill();
+    mx2.fillStyle = g;
+    mx2.beginPath(); mx2.arc(x, y, br, 0, Math.PI * 2); mx2.fill();
   }
-  maskX.restore();
+  mx2.restore();
 }
 
 /* ---------- v3.1-A:品类锚点二次平滑层(独立于唇妆路径,唇妆零改动) ----------
@@ -931,30 +978,32 @@ function drawBlush(f) {
   const W = cv.width, H = cv.height, it = S.blush.int;
   const L = sp(205), R = sp(425), TL = sp(234), TR = sp(454), NB = sp(195);
   if (!L || !R) return;
-  maskX.clearRect(0, 0, W, H);
-  if (S.blush.mode === "smear") {                         // 手涂:浓度场重建蒙版,锁区裁切
-    drawField("blush", f, () => clipBlushLock(maskX, f));
-    blushEdgeFeather(maskX, f);                           // v3.2.1-⑤:脸缘侧羽化,转角越大越宽
-    compositeMask(S.blush.color.c, 0.55*it, 0.38*it);
-    if (S.blush.texture === "shimmer") blushShimmer(f, it);
-    return;
+  const mx2 = catMX.blush;
+  if (maskDirty("blush")) {                               // 脏帧重建缓存蒙版(含染色)
+    mx2.clearRect(0, 0, W, H);
+    if (S.blush.mode === "smear") {                       // 手涂:浓度场重建,锁区裁切
+      drawField("blush", f, c => clipBlushLock(c, f), mx2);
+      blushEdgeFeather(mx2, f);                           // v3.2.1-⑤:脸缘侧羽化,转角越大越宽
+    } else {
+      const r = f.mw * 0.52;
+      if (S.blush.style === "apple") {
+        softSpot(mx2, L.x, L.y, r, r*0.82, 0, .9);
+        softSpot(mx2, R.x, R.y, r, r*0.82, 0, .9);
+      } else if (S.blush.style === "sweep") {
+        const cL = lerpP(L, TL, 0.42), cR = lerpP(R, TR, 0.42);
+        const aL = Math.atan2(TL.y - L.y, TL.x - L.x), aR = Math.atan2(TR.y - R.y, TR.x - R.x);
+        softSpot(mx2, cL.x, cL.y, r*1.15, r*0.55, aL, .9);
+        softSpot(mx2, cR.x, cR.y, r*1.15, r*0.55, aR, .9);
+      } else {                                            // 晒伤腮红:贴鼻两团+鼻梁一抹
+        const cL = lerpP(L, NB, 0.3), cR = lerpP(R, NB, 0.3);
+        softSpot(mx2, cL.x, cL.y, r*0.85, r*0.6, 0, .9);
+        softSpot(mx2, cR.x, cR.y, r*0.85, r*0.6, 0, .9);
+        softSpot(mx2, NB.x, NB.y, r*0.55, r*0.22, 0, .7);
+      }
+    }
+    tintMask(mx2, S.blush.color.c);
   }
-  const r = f.mw * 0.52;
-  if (S.blush.style === "apple") {
-    softSpot(maskX, L.x, L.y, r, r*0.82, 0, .9);
-    softSpot(maskX, R.x, R.y, r, r*0.82, 0, .9);
-  } else if (S.blush.style === "sweep") {
-    const cL = lerpP(L, TL, 0.42), cR = lerpP(R, TR, 0.42);
-    const aL = Math.atan2(TL.y - L.y, TL.x - L.x), aR = Math.atan2(TR.y - R.y, TR.x - R.x);
-    softSpot(maskX, cL.x, cL.y, r*1.15, r*0.55, aL, .9);
-    softSpot(maskX, cR.x, cR.y, r*1.15, r*0.55, aR, .9);
-  } else {                                                 // 晒伤腮红:贴鼻两团+鼻梁一抹
-    const cL = lerpP(L, NB, 0.3), cR = lerpP(R, NB, 0.3);
-    softSpot(maskX, cL.x, cL.y, r*0.85, r*0.6, 0, .9);
-    softSpot(maskX, cR.x, cR.y, r*0.85, r*0.6, 0, .9);
-    softSpot(maskX, NB.x, NB.y, r*0.55, r*0.22, 0, .7);
-  }
-  compositeMask(S.blush.color.c, 0.55*it, 0.38*it);
+  compositeFrom(catM.blush, 0.55*it, 0.38*it);
   if (S.blush.texture === "shimmer") blushShimmer(f, it);
 }
 
@@ -991,16 +1040,20 @@ function browCenter(top, bot) {                           // 贴合修正后的�
 function drawBrow(f) {
   const W = cv.width, H = cv.height, it = S.brow.int;
   if (!S.lm[70] || !S.lm[300]) return;
-  maskX.clearRect(0, 0, W, H);
-  maskX.save();
-  try { maskX.filter = "blur(2.5px)"; } catch (e) {}
-  maskX.fillStyle = "#fff";
-  for (const pts of [browPoly(BROW_L_TOP, BROW_L_BOT, f), browPoly(BROW_R_TOP, BROW_R_BOT, f)]) {
-    maskX.beginPath(); smoothPath(maskX, pts); maskX.fill();
+  const mx2 = catMX.brow;
+  if (maskDirty("brow")) {
+    mx2.clearRect(0, 0, W, H);
+    mx2.save();
+    try { mx2.filter = "blur(2.5px)"; } catch (e) {}
+    mx2.fillStyle = "#fff";
+    for (const pts of [browPoly(BROW_L_TOP, BROW_L_BOT, f), browPoly(BROW_R_TOP, BROW_R_BOT, f)]) {
+      mx2.beginPath(); smoothPath(mx2, pts); mx2.fill();
+    }
+    try { mx2.filter = "none"; } catch (e) {}
+    mx2.restore();
+    tintMask(mx2, S.brow.color.c);
   }
-  try { maskX.filter = "none"; } catch (e) {}
-  maskX.restore();
-  compositeMask(S.brow.color.c, 0.30*it, 0.62*it);
+  compositeFrom(catM.brow, 0.30*it, 0.62*it);
 }
 
 /* ---------- 眼影 ---------- */
@@ -1048,23 +1101,26 @@ function buildEyeLockPath(c, f) {
 function drawEye(f) {
   const W = cv.width, H = cv.height, it = S.eye.int;
   if (!S.lm[133] || !S.lm[362]) return;
-  maskX.clearRect(0, 0, W, H);
-  if (S.eye.mode === "smear") {                           // 手涂:浓度场重建蒙版,上睑带锁区裁切
-    drawField("eye", f, () => { buildEyeLockPath(maskX, f); maskX.clip(); });
-    compositeMask(S.eye.color.c, 0.55*it, 0.42*it);
-    if (S.eye.texture === "pearl") eyePearl(f, it);
-    return;
+  const mx2 = catMX.eye;
+  if (maskDirty("eye")) {
+    mx2.clearRect(0, 0, W, H);
+    if (S.eye.mode === "smear") {                         // 手涂:浓度场重建,上睑带锁区裁切
+      drawField("eye", f, c => { buildEyeLockPath(c, f); c.clip(); }, mx2);
+    } else {
+      mx2.save();
+      try { mx2.filter = "blur(4px)"; } catch (e) {}
+      mx2.fillStyle = "#fff"; mx2.globalAlpha = 0.9;
+      for (const arc of [EYE_L, EYE_R]) {
+        mx2.beginPath(); smoothPath(mx2, eyePoly(arc, f, 0, 1)); mx2.fill();
+      }
+      try { mx2.filter = "none"; } catch (e) {}
+      mx2.restore();
+    }
+    tintMask(mx2, S.eye.color.c);
   }
-  maskX.save();
-  try { maskX.filter = "blur(4px)"; } catch (e) {}
-  maskX.fillStyle = "#fff"; maskX.globalAlpha = 0.9;
-  for (const arc of [EYE_L, EYE_R]) {
-    maskX.beginPath(); smoothPath(maskX, eyePoly(arc, f, 0, 1)); maskX.fill();
-  }
-  try { maskX.filter = "none"; } catch (e) {}
-  maskX.restore();
-  compositeMask(S.eye.color.c, 0.55*it, 0.42*it);
-  if (S.eye.texture === "pearl") eyePearl(f, it);       // 须在渐变改写蒙版前提亮
+  compositeFrom(catM.eye, 0.55*it, 0.42*it);
+  if (S.eye.texture === "pearl") eyePearl(f, it);
+  if (S.eye.mode === "smear") return;
   if (S.eye.grad) {                                        // 渐变:外眼角加深
     maskX.clearRect(0, 0, W, H);
     maskX.save();
@@ -1081,36 +1137,35 @@ function drawEye(f) {
 /* ---------- 唇妆 ---------- */
 function drawLips(f) {
   const W = cv.width, H = cv.height, i = S.lip.int;
+  const mx2 = catMX.lip;
 
-  // 1) 生成蒙版(白色,带透明度)
-  maskX.clearRect(0, 0, W, H);
-  if (S.lip.maskMode === "full") {
-    maskX.save();
-    try { maskX.filter = "blur(2.5px)"; } catch (e) {}
-    buildLipPath(maskX, f);
-    maskX.fillStyle = "#fff"; maskX.fill("evenodd");
-    try { maskX.filter = "none"; } catch (e) {}
-    maskX.restore();
-  } else {
-    // v3.2:浓度场重建蒙版;唇路径裁切(护牙),张嘴时顶点分离自然不断裂
-    drawField("lip", f, () => { buildLipPath(maskX, f); maskX.clip("evenodd"); });
+  // 1) 蒙版(脏帧重建,含染色一并缓存)
+  if (maskDirty("lip")) {
+    mx2.clearRect(0, 0, W, H);
+    if (S.lip.maskMode === "full") {
+      mx2.save();
+      try { mx2.filter = "blur(2.5px)"; } catch (e) {}
+      buildLipPath(mx2, f);
+      mx2.fillStyle = "#fff"; mx2.fill("evenodd");
+      try { mx2.filter = "none"; } catch (e) {}
+      mx2.restore();
+    } else {
+      // 浓度场重建蒙版;唇路径裁切(护牙),张嘴时顶点分离自然不断裂
+      drawField("lip", f, c => { buildLipPath(c, f); c.clip("evenodd"); }, mx2);
+    }
+    tintMask(mx2, S.lip.color.c);
   }
-  // 2) 蒙版着色
-  maskX.save();
-  maskX.globalCompositeOperation = "source-in";
-  maskX.fillStyle = S.lip.color.c; maskX.fillRect(0, 0, W, H);
-  maskX.restore();
 
-  // 3) 合成到画面:color 换色保留唇纹 + multiply 加深 + 深唇基底补偿
+  // 2) 合成到画面:color 换色保留唇纹 + multiply 加深 + 深唇基底补偿
   // dk=唇色基底深度(0浅唇~1深唇):深唇时薄涂保留基底暗调,厚涂增加颜料遮盖、减弱加深
   const dk = clamp((55 - S.lipL) / 35, 0, 1);
   ctx.save();
-  ctx.globalCompositeOperation = "color";    ctx.globalAlpha = 0.78 * i; ctx.drawImage(maskC, 0, 0);
-  ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = 0.50 * i * (1 - 0.55 * dk); ctx.drawImage(maskC, 0, 0);
+  ctx.globalCompositeOperation = "color";    ctx.globalAlpha = 0.78 * i; ctx.drawImage(catM.lip, 0, 0);
+  ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = 0.50 * i * (1 - 0.55 * dk); ctx.drawImage(catM.lip, 0, 0);
   if (dk > 0.02) {
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 0.38 * i * i * dk;                   // i平方:薄涂几乎不遮盖,厚涂遮盖明显
-    ctx.drawImage(maskC, 0, 0);
+    ctx.drawImage(catM.lip, 0, 0);
   }
   ctx.restore();
 
@@ -1131,7 +1186,7 @@ function drawLips(f) {
     glossX.save(); glossX.translate(ux2, uy2); glossX.scale(1, 0.4); glossX.translate(-ux2, -uy2);
     glossX.fillStyle = g2; glossX.fillRect(ux2 - r2, uy2 - r2, r2 * 2, r2 * 2); glossX.restore();
     glossX.save(); glossX.globalCompositeOperation = "destination-in";
-    glossX.drawImage(maskC, 0, 0); glossX.restore();       // 高光只落在已上色区域
+    glossX.drawImage(catM.lip, 0, 0); glossX.restore();    // 高光只落在已上色区域
     ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.55 * i;
     ctx.drawImage(glossC, 0, 0); ctx.restore();
   }
@@ -1298,7 +1353,7 @@ function buildSwatches() {
     el.className = "sw" + (match(p) ? " rec" : "") + (S.lip.color && S.lip.color.c === p.c ? " on" : "");
     el.innerHTML = `<span class="dot" style="background:${p.c}"><span class="star">★</span></span><span class="nm">${p.n}</span>`;
     el.addEventListener("click", () => {
-      S.lip.color = p;
+      S.lip.color = p; bumpRev("lip");
       document.documentElement.style.setProperty("--accent", p.c);   // 界面强调色随口红走
       box.querySelectorAll(".sw").forEach(s => s.classList.remove("on"));
       el.classList.add("on");
@@ -1390,7 +1445,7 @@ function renderModeRow() {
         <span class="toolNote">点色上脸·浓度滑杆可调</span>`);
       tools.querySelectorAll("[data-bs]").forEach(b => {
         b.classList.toggle("on", b.dataset.bs === S.blush.style);
-        b.onclick = () => { S.blush.style = b.dataset.bs;
+        b.onclick = () => { S.blush.style = b.dataset.bs; bumpRev("blush");
           tools.querySelectorAll("[data-bs]").forEach(x => x.classList.toggle("on", x === b)); };
       });
     } else smearToolChips(tools, "在脸颊上涂抹·出界自动裁掉");
@@ -1403,7 +1458,7 @@ function renderModeRow() {
       <span class="toolNote">染眉色·保留真实眉流</span>`;
     tools.querySelectorAll("[data-bw]").forEach(b => {
       b.classList.toggle("on", b.dataset.bw === S.brow.shape);
-      b.onclick = () => { S.brow.shape = b.dataset.bw;
+      b.onclick = () => { S.brow.shape = b.dataset.bw; bumpRev("brow");
         tools.querySelectorAll("[data-bw]").forEach(x => x.classList.toggle("on", x === b)); };
     });
 
@@ -1416,9 +1471,9 @@ function renderModeRow() {
         <span class="toolNote">眼影晕染在上眼皮</span>`);
       $("eyeSolid").classList.toggle("on", !S.eye.grad);
       $("eyeGrad").classList.toggle("on", S.eye.grad);
-      $("eyeSolid").onclick = () => { S.eye.grad = false;
+      $("eyeSolid").onclick = () => { S.eye.grad = false; bumpRev("eye");
         $("eyeSolid").classList.add("on"); $("eyeGrad").classList.remove("on"); };
-      $("eyeGrad").onclick = () => { S.eye.grad = true;
+      $("eyeGrad").onclick = () => { S.eye.grad = true; bumpRev("eye");
         $("eyeGrad").classList.add("on"); $("eyeSolid").classList.remove("on"); };
     } else smearToolChips(tools, "在眼皮上涂抹·出界自动裁掉");
 
@@ -1443,7 +1498,7 @@ function catModeChips(tools, key) {
   tools.querySelectorAll("[data-m]").forEach(b => b.onclick = () => setCatMode(key, b.dataset.m));
 }
 function setCatMode(key, m) {
-  S[key].mode = m;
+  S[key].mode = m; bumpRev(key);
   if (m === "smear") {
     if (!S[key].color) hint("先在色板选个颜色,再用手指涂抹");
     else if (!FIELD[key].has) hint(key === "blush" ? "用手指在脸颊上来回涂抹上妆" : "用手指在眼皮上来回涂抹上妆");
@@ -1465,6 +1520,7 @@ function smearToolChips(tools, note) {
 /* 唇妆二级模式切换 */
 function setLipMode(m) {
   if (m === "shape" && S.lip.mode !== "shape") S.lip.prevMode = S.lip.mode;
+  bumpRev("lip");
   if (m === "oneclick") S.lip.maskMode = "full";
   if (m === "smear") {
     if (S.lip.maskMode === "full" && S.lip.color && !FIELD.lip.has) {   // 从整唇切来且涂层为空:铺满,可局部擦除
@@ -1510,6 +1566,7 @@ function setBrush(b) {
   const e = $("eraserBtn"); if (e) e.classList.remove("on");
 }
 function applyPreset(name) {
+  bumpRev("lip");
   CTRLS.forEach(c => S.offsets[c.key] = { u: 0, v: 0 });
   const ps = PRESETS[name] || {};
   for (const k in ps) S.offsets[k] = { u: ps[k].u, v: ps[k].v };
@@ -1579,6 +1636,7 @@ cv.addEventListener("pointermove", e => {
     const du = (dx * f.ux + dy * f.uy) / f.mw, dv = (dx * f.vx + dy * f.vy) / f.mw;
     const o = S.offsets[S.dragCtrl];
     o.u = clamp(o.u + du, -0.09, 0.09); o.v = clamp(o.v + dv, -0.09, 0.09);
+    bumpRev("lip");
     const ctrl = CTRLS.find(c => c.key === S.dragCtrl);
     if (S.symmetric && ctrl.pair) {
       S.offsets[ctrl.pair] = { u: -o.u, v: o.v };
@@ -1619,7 +1677,7 @@ $("zoomOut").addEventListener("click", () => {
 
 /* Clear:点击只卸当前品类;长按550ms全品类卸妆(衣橱页签作用于唇妆) */
 function clearCat(key) {
-  S[key].color = null;
+  S[key].color = null; bumpRev(key);
   clearField(key);                                       // 该品类手涂浓度场一并清空
   document.querySelectorAll("#swatches .sw").forEach(s => s.classList.remove("on"));
 }
@@ -1694,7 +1752,7 @@ function renderCatPalette(list, cat) {                     // 通用品类色板
       (S[cat].color && S[cat].color.c === p.c ? " on" : "");
     el.innerHTML = `<span class="dot" style="background:${p.c}"><span class="star">★</span></span><span class="nm">${p.n}</span>`;
     el.addEventListener("click", () => {
-      S[cat].color = p;
+      S[cat].color = p; bumpRev(cat);
       document.documentElement.style.setProperty("--accent", p.c);
       box.querySelectorAll(".sw").forEach(x => x.classList.remove("on"));
       el.classList.add("on");
@@ -1726,7 +1784,7 @@ function renderWardrobe() {
       // 衣橱点选 = 一键应用到唇妆品类
       S.lip.color = { n: w.name, c: w.color, t: "neutral" };
       S.lip.mode = "oneclick"; S.lip.maskMode = "full";
-      S.lip.texture = w.texture;
+      S.lip.texture = w.texture; bumpRev("lip");
       renderTexSeg();
       document.documentElement.style.setProperty("--accent", w.color);
       box.querySelectorAll(".sw").forEach(x => x.classList.remove("on"));
