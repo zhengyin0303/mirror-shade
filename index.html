@@ -225,12 +225,12 @@
   <div class="box">
     <h3>镜色 · 怎么玩</h3>
     <div class="hRow"><b>★ 是什么</b>打开镜子时已自动分析你的肤色,色板里带 ★ 的色号是依据你的肤色挑选的推荐色。</div>
-    <div class="hRow"><b>一键试色</b>点任意色号,口红立刻上唇,适合快速挑色。</div>
-    <div class="hRow"><b>亲手上妆</b>用手指在屏幕里的嘴唇上来回涂抹,越涂越浓;涂出界会自动裁掉,不会画花;可换"卸妆棉"局部擦掉。</div>
-    <div class="hRow"><b>唇型</b>拖动白色圆点改唇形,或点微笑唇/嘟嘟唇等预设。</div>
-    <div class="hRow"><b>腮红·眉妆·眼影</b>对应页签里点色即上妆:腮红有苹果肌/斜扫/晒伤三种打法;眉妆染色保留真实眉流,可加粗或挑眉;眼影可单色或外眼角渐变。浓度滑杆分品类独立记忆。</div>
+    <div class="hRow"><b>先选品类,再选玩法</b>下方五个页签:唇妆/腮红/眉妆/眼影/衣橱。每个品类里再选"一键上妆"或"亲手上妆"。</div>
+    <div class="hRow"><b>一键上妆</b>点任意色号立刻上妆:腮红有苹果肌/斜扫/晒伤三种打法;眼影可单色或外眼角渐变;眉妆点色即染,可加粗或挑眉。</div>
+    <div class="hRow"><b>亲手上妆</b>用手指在嘴唇/脸颊/眼皮上来回涂抹,越涂越浓;涂出界自动裁掉;"卸妆棉"局部擦除。唇妆里还能拖白色圆点改唇型。</div>
+    <div class="hRow"><b>质地与浓度</b>唇妆哑光/水光,腮红哑光/微闪,眼影哑光/珠光;浓度滑杆与质地都按品类分开记忆。</div>
     <div class="hRow"><b>口红衣橱</b>长按色板任意色号收藏进衣橱;"衣橱"页签里管理和试涂;再选相近颜色时会提醒撞色,买前查重。</div>
-    <div class="hRow"><b>小手势</b>右上 +/− 调画面大小,双指张开放大、捏合缩小(摄像头太近时缩小看全脸,四周自动以模糊背景填充);按住"按住对比"看素颜;不满意点 Clear 重来。</div>
+    <div class="hRow"><b>小手势</b>右上 +/− 调画面大小,双指捏合缩放;"按住对比"只看当前品类的前后差别;Clear 卸当前品类,长按 Clear 全部卸妆。</div>
     <div class="hRow"><b>隐私</b>所有画面只在你的手机上处理,不会上传。</div>
     <button class="chip solid" id="helpClose" style="margin-top:14px;width:100%;padding:11px 0;">知道了,开始试妆</button>
   </div>
@@ -355,9 +355,9 @@ const S = {
   // 品类状态:color 当前色 {n,c,t} / int 浓度 / texture 质地 / mode 二级模式
   lip:   { mode: "oneclick", maskMode: "full", color: null, texture: "matte",
            int: 0.7, prevMode: null },                // maskMode: full(整唇)|paint(涂抹层)
-  blush: { mode: "oneclick", color: null, style: "apple", int: 0.5 },   // 腮红
-  brow:  { color: null, shape: "natural", int: 0.5 },                   // 眉妆(无质地、无手涂)
-  eye:   { mode: "oneclick", color: null, grad: false, int: 0.5 },      // 眼影
+  blush: { mode: "oneclick", color: null, style: "apple", texture: "matte", int: 0.5 },  // 腮红:哑光|微闪
+  brow:  { color: null, shape: "natural", int: 0.5 },                                    // 眉妆(无质地、无手涂)
+  eye:   { mode: "oneclick", color: null, grad: false, texture: "matte", int: 0.5 },     // 眼影:哑光|珠光
   compare: null,            // null | "lip" | "blush" | "brow" | "eye":按住对比的品类
   lm: null,                 // 平滑后的关键点 [ {x,y} ... ] 画布坐标(已镜像)
   lostFrames: 0,
@@ -698,6 +698,37 @@ function softSpot(c, x, y, rx, ry, rot, a) {              // 柔边椭圆光斑
   c.fillStyle = g; c.beginPath(); c.arc(0, 0, rx, 0, Math.PI*2); c.fill(); c.restore();
 }
 function lerpP(a, b, t) { return { x: a.x + (b.x-a.x)*t, y: a.y + (b.y-a.y)*t }; }
+function wideGlow(c, x, y, rx, ry, a) {                   // 比 softSpot 更散的平缓高光
+  c.save(); c.translate(x, y); c.scale(1, ry / rx);
+  const g = c.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(0.55, `rgba(255,255,255,${a*0.7})`);
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  c.fillStyle = g; c.beginPath(); c.arc(0, 0, rx, 0, Math.PI*2); c.fill(); c.restore();
+}
+/* 微闪/珠光:复用唇部水光 screen 提亮管线(高光经 destination-in 只落在该品类妆区) */
+function blushShimmer(f, it) {                            // 微闪:强度=唇水光减半,范围更散
+  const W = cv.width, H = cv.height;
+  glossX.clearRect(0, 0, W, H);
+  for (const P of [S.lm[205], S.lm[425]])
+    wideGlow(glossX, P.x, P.y, f.mw * 0.50, f.mw * 0.40, 0.8);
+  glossX.save(); glossX.globalCompositeOperation = "destination-in";
+  glossX.drawImage(maskC, 0, 0); glossX.restore();
+  ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.275 * it;
+  ctx.drawImage(glossC, 0, 0); ctx.restore();
+}
+function eyePearl(f, it) {                                // 珠光:强度介于唇水光与腮红微闪之间
+  const W = cv.width, H = cv.height;
+  glossX.clearRect(0, 0, W, H);
+  const lift = f.mw * 0.14;
+  for (const id of [159, 386]) {
+    const P = S.lm[id];
+    wideGlow(glossX, P.x, P.y - lift, f.mw * 0.30, f.mw * 0.14, 0.85);
+  }
+  glossX.save(); glossX.globalCompositeOperation = "destination-in";
+  glossX.drawImage(maskC, 0, 0); glossX.restore();
+  ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.40 * it;
+  ctx.drawImage(glossC, 0, 0); ctx.restore();
+}
 
 /* ---------- 腮红 ---------- */
 function buildBlushLockPath(c, f) {                       // 锁区:两颊柔边大椭圆(一键腮红最大覆盖域)
@@ -720,6 +751,7 @@ function drawBlush(f) {
     maskX.setTransform(1, 0, 0, 1, 0, 0);
     maskX.restore();
     compositeMask(S.blush.color.c, 0.55*it, 0.38*it);
+    if (S.blush.texture === "shimmer") blushShimmer(f, it);
     return;
   }
   const r = f.mw * 0.52;
@@ -738,6 +770,7 @@ function drawBlush(f) {
     softSpot(maskX, NB.x, NB.y, r*0.55, r*0.22, 0, .7);
   }
   compositeMask(S.blush.color.c, 0.55*it, 0.38*it);
+  if (S.blush.texture === "shimmer") blushShimmer(f, it);
 }
 
 /* ---------- 眉妆 ---------- */
@@ -807,6 +840,7 @@ function drawEye(f) {
     maskX.setTransform(1, 0, 0, 1, 0, 0);
     maskX.restore();
     compositeMask(S.eye.color.c, 0.55*it, 0.42*it);
+    if (S.eye.texture === "pearl") eyePearl(f, it);
     return;
   }
   maskX.save();
@@ -818,6 +852,7 @@ function drawEye(f) {
   try { maskX.filter = "none"; } catch (e) {}
   maskX.restore();
   compositeMask(S.eye.color.c, 0.55*it, 0.42*it);
+  if (S.eye.texture === "pearl") eyePearl(f, it);       // 须在渐变改写蒙版前提亮
   if (S.eye.grad) {                                        // 渐变:外眼角加深
     maskX.clearRect(0, 0, W, H);
     maskX.save();
@@ -1109,8 +1144,10 @@ function setCat(cat) {
 
 /* 质地 seg:按品类显隐与取值(衣橱沿用唇妆) */
 const TEX_OPTS = {
-  lip: [["matte", "哑光"], ["gloss", "水光"]],
-};
+  lip:   [["matte", "哑光"], ["gloss", "水光"]],
+  blush: [["matte", "哑光"], ["shimmer", "微闪"]],
+  eye:   [["matte", "哑光"], ["pearl", "珠光"]],
+};   // 眉妆无质地维度,整行隐藏
 function renderTexSeg() {
   const key = activeCatKey(), seg = $("texSeg"), opts = TEX_OPTS[key];
   if (!opts) { seg.style.display = "none"; seg.innerHTML = ""; return; }   // 眉妆等:整体隐藏
