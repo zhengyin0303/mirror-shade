@@ -316,6 +316,39 @@ const t = (name, ok, extra) => {
   await page.waitForTimeout(400);
   await refresh();
 
+  /* ========== v3.1-A:品类锚点抖动平滑 ========== */
+  // 注入识别噪声,平滑后锚点(browLS)的帧间标准差应显著低于原始锚点(browL)
+  const jit = await page.evaluate(() => new Promise(res => {
+    window.__face.jitter = 0.004;                                  // 真机量级噪声(±4.5px画布)
+    const raw = [], sm = [];
+    let n = 0;
+    const tick = () => {
+      const L = window.__msDebug().lm;
+      raw.push(L.browL.slice()); sm.push(L.browLS.slice());
+      if (++n < 40) requestAnimationFrame(tick);
+      else { window.__face.jitter = 0; res({ raw, sm }); }
+    };
+    requestAnimationFrame(tick);
+  }));
+  const std = a => {
+    const m = a.reduce((s, p) => [s[0] + p[0], s[1] + p[1]], [0, 0]).map(v => v / a.length);
+    return Math.sqrt(a.reduce((s, p) => s + (p[0] - m[0]) ** 2 + (p[1] - m[1]) ** 2, 0) / a.length);
+  };
+  const rawStd = std(jit.raw), smStd = std(jit.sm);
+  t("噪声下品类锚点二次平滑生效(std较原始降≥30%)", smStd < rawStd * 0.7 && rawStd > 0.8,
+    `raw=${rawStd.toFixed(2)}px → smooth=${smStd.toFixed(2)}px`);
+  // 大位移自动放行:头部大幅移动后平滑点须迅速贴住原始点(无拖影滞后)
+  await page.evaluate(() => { window.__face.dx = 0.06; });
+  await page.waitForTimeout(450);
+  const lag = await page.evaluate(() => {
+    const L = window.__msDebug().lm;
+    return Math.hypot(L.browLS[0] - L.browL[0], L.browLS[1] - L.browL[1]);
+  });
+  t("大位移自动放行(平滑点滞后<4px)", lag < 4, `lag=${lag.toFixed(2)}px`);
+  await page.evaluate(() => { window.__face.dx = 0; });
+  await page.waitForTimeout(400);
+  await refresh();
+
   /* ========== 浓度分品类记忆 ========== */
   await page.click('.tab[data-cat="eye"]');
   await page.locator("#intensity").fill("90");

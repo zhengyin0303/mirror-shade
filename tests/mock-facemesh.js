@@ -2,13 +2,15 @@
 // 通过 window.__face = {dx, dy} 可模拟头部移动
 // 覆盖锚点:唇环/眉弓/上睑/颧点/鬓侧/鼻梁,与 index.html 渲染索引一一对应
 (function () {
-  window.__face = { dx: 0, dy: 0 };
+  window.__face = { dx: 0, dy: 0, jitter: 0 };   // jitter: 每帧随机噪声幅度(归一化坐标),模拟识别抖动
 
   function genLandmarks() {
-    const { dx, dy } = window.__face;
+    const { dx, dy, jitter } = window.__face;
+    const j = jitter || 0;
     const pts = [];
     for (let i = 0; i < 478; i++) pts.push({ x: 0.5 + dx, y: 0.45 + dy, z: 0 });
-    const set = (i, x, y) => { pts[i] = { x: x + dx, y: y + dy, z: 0 }; };
+    const set = (i, x, y) => { pts[i] = { x: x + dx + (Math.random() - 0.5) * j,
+                                          y: y + dy + (Math.random() - 0.5) * j, z: 0 }; };
     // 鼻尖(变焦中心)与肤色采样点(脸颊/额头)
     set(1, 0.5, 0.45);
     set(101, 0.42, 0.42); set(330, 0.58, 0.42);
@@ -17,6 +19,9 @@
     set(205, 0.40, 0.47); set(425, 0.60, 0.47);
     set(234, 0.33, 0.45); set(454, 0.67, 0.45);
     set(195, 0.50, 0.42);
+    // 颊辅点(50/280,质心基轴)与鼻翼(129/358,腮红锁区内边界)
+    set(50, 0.41, 0.44);  set(280, 0.59, 0.44);
+    set(129, 0.46, 0.46); set(358, 0.54, 0.46);
     // 眉弓上下弧 + 上睑弧线(v2.2眉妆/v2.4眼影渲染与采样锚点,索引与正式版一致)
     // 左眉顶[70..107]外→内,底[55..46]内→外;右侧镜像。中点(105/334)为眉峰
     [[70,63,105,66,107,-1], [300,293,334,296,336,1]].forEach(a => { const s = a[5];
