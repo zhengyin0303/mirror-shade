@@ -711,11 +711,11 @@ function drawDebug(f) {
   dbgStroke(eyeLockPoly(EYE_R), "#7E5BD6");
   dbgDot(sp(33), "#B98CFF"); dbgDot(sp(263), "#B98CFF");
   // 腮红:锁区椭圆近似(粉)+ 颧点/鬓侧/鼻翼锚点
-  const r = f.mw * 0.52 * 1.1;
+  const r = f.mw * 0.52;
   for (const id of [205, 425]) {
     const P = sp(id), e = [];
     for (let a = 0; a <= 32; a++)
-      e.push([P.x + r * Math.cos(a / 16 * Math.PI), P.y + r * 0.8 * Math.sin(a / 16 * Math.PI)]);
+      e.push([P.x + r * Math.cos(a / 16 * Math.PI), P.y + r * 0.75 * Math.sin(a / 16 * Math.PI)]);
     dbgStroke(e, "#FF8CC6");
     dbgDot(P, "#FF8CC6");
   }
@@ -788,13 +788,15 @@ function eyePearl(f, it) {                                // 珠光:强度介于
    品类子网格上,锁区天然成立。
 ==================================================================== */
 function mkField(n) { return { dens: new Float32Array(n), nodes: [], has: false }; }
-const FIELD = { lip: mkField(40), blush: mkField(14), eye: mkField(40) };
+const FIELD = { lip: mkField(60), blush: mkField(14), eye: mkField(44) };
 function clearField(key) { const F = FIELD[key]; if (F) { F.dens.fill(0); F.has = false; } }
 const BRUSH_SCALE = { lip: 1.6, blush: 1.8, eye: 1.4 };  // 刷径按区域尺度等比(沿用旧仿射span值)
 
-function lipFieldNodes(f) {                              // 唇:外环20+内环20(含唇形偏移,与渲染路径一致)
+function lipFieldNodes(f) {                              // 唇:外环20+内环20+带中线20(v3.2.1-②消除中央涂不满)
   const br = f.mw * 0.11;
-  return ringPts(OUTER, f, 1).concat(ringPts(INNER, f, 0.5)).map(p => [p[0], p[1], br]);
+  const o = ringPts(OUTER, f, 1), inn = ringPts(INNER, f, 0.5);
+  const mid = o.map((p, j) => [(p[0] + inn[j][0]) / 2, (p[1] + inn[j][1]) / 2]);
+  return o.concat(inn, mid).map(p => [p[0], p[1], br]);
 }
 function blushFieldNodes(f) {                            // 腮红:每侧颧心+实点环(上/内/外)+镜像下环
   const out = [], br = f.mw * 0.34;
@@ -807,13 +809,15 @@ function blushFieldNodes(f) {                            // 腮红:每侧颧心+
   }
   return out;
 }
-function eyeFieldNodes() {                               // 眼影:每侧睑弧9点+眼尾延伸点,各配上排点(向眉下缘55%)
-  const out = [];
+function eyeFieldNodes() {                               // 眼影:内角延伸+睑弧9点+眼尾延伸,各配上排点(向眉下缘55%)
+  const out = [];                                        // v3.2.1-③:完整含内外眼角
   for (const [arc, brows] of [[EYE_L, [55, 65, 52, 53, 46]], [EYE_R, [285, 295, 282, 283, 276]]]) {
     const lash = arc.map(id => sp(id));
+    const head = { x: lash[0].x + (lash[0].x - lash[1].x) * 0.8,
+                   y: lash[0].y + (lash[0].y - lash[1].y) * 0.8 };
     const tail = { x: lash[8].x + (lash[8].x - lash[7].x) * 1.6,
                    y: lash[8].y + (lash[8].y - lash[7].y) * 1.6 };
-    const pts = lash.concat([tail]);
+    const pts = [head].concat(lash, [tail]);
     const eyeW = Math.hypot(lash[8].x - lash[0].x, lash[8].y - lash[0].y) || 1;
     const br = eyeW * 0.17;
     const browAt = t => { const u = t * 4, i0 = Math.min(3, Math.floor(u)), fr = u - i0;
@@ -821,7 +825,7 @@ function eyeFieldNodes() {                               // 眼影:每侧睑弧9
       return { x: a.x + (b.x - a.x) * fr, y: a.y + (b.y - a.y) * fr }; };
     pts.forEach((p, i) => {
       out.push([p.x, p.y, br]);
-      const bb = browAt(Math.min(1, i / 8));
+      const bb = browAt(Math.max(0, Math.min(1, (i - 1) / 8)));
       out.push([p.x + (bb.x - p.x) * 0.55, p.y + (bb.y - p.y) * 0.55, br * 1.1]);
     });
   }
@@ -892,11 +896,11 @@ function smoothAnchors() {
 function sp(id) { return smCache.get(id) || S.lm[id]; }  // 平滑后锚点(未缓存时回退原始点)
 
 /* ---------- 腮红 ---------- */
-function clipBlushLock(c, f) {                            // v3.1-C:锁区收紧——椭圆∩[鼻翼竖线,脸缘]
-  const r = f.mw * 0.52 * 1.1, L = sp(205), R = sp(425);
+function clipBlushLock(c, f) {                            // 锁区:椭圆∩[鼻翼竖线,脸缘](v3.2.1-⑤再收缩)
+  const r = f.mw * 0.52, L = sp(205), R = sp(425);
   c.beginPath();
-  c.ellipse(L.x, L.y, r, r * 0.8, 0, 0, Math.PI * 2);
-  c.ellipse(R.x, R.y, r, r * 0.8, 0, 0, Math.PI * 2);
+  c.ellipse(L.x, L.y, r, r * 0.75, 0, 0, Math.PI * 2);
+  c.ellipse(R.x, R.y, r, r * 0.75, 0, 0, Math.PI * 2);
   c.clip();
   const H = c.canvas.height;
   const nL = sp(129), nR = sp(358), eL = sp(234), eR = sp(454);   // 鼻翼 / 脸缘
@@ -907,6 +911,22 @@ function clipBlushLock(c, f) {                            // v3.1-C:锁区收紧
     c.clip();
   }
 }
+function blushEdgeFeather(c, f) {                         // v3.2.1-⑤:外缘羽化;yaw(转角)越大羽化带越宽
+  const nose = sp(195) || sp(1), eL = sp(234), eR = sp(454);
+  if (!nose || !eL || !eR) return;
+  const dL = Math.abs(nose.x - eL.x), dR = Math.abs(eR.x - nose.x);
+  const yaw = clamp(Math.abs(dL - dR) / (Math.max(dL, dR) || 1), 0, 1);
+  const fe = f.mw * (0.06 + 0.20 * yaw);
+  c.save(); c.globalCompositeOperation = "destination-out";
+  for (const edge of [eL, eR]) {
+    const dir = nose.x > edge.x ? 1 : -1;                 // 从脸缘指向脸内
+    const g = c.createLinearGradient(edge.x, 0, edge.x + dir * fe, 0);
+    g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = g;
+    c.fillRect(Math.min(edge.x, edge.x + dir * fe), 0, fe, c.canvas.height);
+  }
+  c.restore();
+}
 function drawBlush(f) {
   const W = cv.width, H = cv.height, it = S.blush.int;
   const L = sp(205), R = sp(425), TL = sp(234), TR = sp(454), NB = sp(195);
@@ -914,6 +934,7 @@ function drawBlush(f) {
   maskX.clearRect(0, 0, W, H);
   if (S.blush.mode === "smear") {                         // 手涂:浓度场重建蒙版,锁区裁切
     drawField("blush", f, () => clipBlushLock(maskX, f));
+    blushEdgeFeather(maskX, f);                           // v3.2.1-⑤:脸缘侧羽化,转角越大越宽
     compositeMask(S.blush.color.c, 0.55*it, 0.38*it);
     if (S.blush.texture === "shimmer") blushShimmer(f, it);
     return;
@@ -945,6 +966,12 @@ function browPoly(top, bot, f) {
     .concat(bot.map(i => ({ x: sp(i).x, y: sp(i).y })));
   const cx = pts.reduce((a,p)=>a+p.x,0)/pts.length, cy = pts.reduce((a,p)=>a+p.y,0)/pts.length;
   const h = Math.max(4, Math.abs(sp(top[2]).y - sp(bot[2]).y));
+  // v3.2.1-④ 贴合修正(真机回环:轮廓偏上约半眉高/眉尾外溢/过宽扁):
+  // 整体下移0.5眉高;宽度×0.93、高度×1.22;眉尾两点向内收
+  pts = pts.map(p => ({ x: cx + (p.x - cx) * 0.93, y: cy + (p.y - cy) * 1.22 + h * 0.5 }));
+  pts[0].x = cx + (pts[0].x - cx) * 0.86; pts[1].x = cx + (pts[1].x - cx) * 0.94;
+  pts[pts.length-1].x = cx + (pts[pts.length-1].x - cx) * 0.86;
+  pts[pts.length-2].x = cx + (pts[pts.length-2].x - cx) * 0.94;
   if (S.brow.shape === "bold")
     pts = pts.map(p => ({ x: cx + (p.x-cx)*1.06, y: cy + (p.y-cy)*1.45 }));
   if (S.brow.shape === "arch") {                           // 挑眉:尾部上扬(top/bot首元素为外端)
@@ -952,6 +979,14 @@ function browPoly(top, bot, f) {
     pts[pts.length-1].y -= h*0.55; pts[pts.length-2].y -= h*0.25;
   }
   return pts.map(p => [p.x, p.y]);
+}
+function browCenter(top, bot) {                           // 贴合修正后的眉区中心(测试/调试锚点)
+  const ids = top.concat(bot);
+  let cx = 0, cy = 0;
+  ids.forEach(id => { cx += sp(id).x; cy += sp(id).y; });
+  cx /= ids.length; cy /= ids.length;
+  const h = Math.max(4, Math.abs(sp(top[2]).y - sp(bot[2]).y));
+  return [cx, cy + h * 0.5];
 }
 function drawBrow(f) {
   const W = cv.width, H = cv.height, it = S.brow.int;
@@ -989,16 +1024,18 @@ function shadeDarken(hex, k) {
   const f2 = v => Math.round(v * (1 - k)).toString(16).padStart(2, "0");
   return "#" + f2(r) + f2(g) + f2(b);
 }
-function eyeLockPoly(arc) {                               // v3.1-C:锁区=全上睑+眼尾外扩~15%+上至眉下缘70%
+function eyeLockPoly(arc) {                               // 锁区=内角延伸+全上睑+眼尾外扩~20%+上至眉下缘70%
   const lash = arc.map(i => ({ x: sp(i).x, y: sp(i).y }));
   const n = lash.length;
-  const tail = { x: lash[n-1].x + (lash[n-1].x - lash[n-2].x) * 1.6,   // v3.2-§2.2:外扩~20%(1.6段)
+  const head = { x: lash[0].x + (lash[0].x - lash[1].x) * 0.8,         // v3.2.1-③:内眼角侧延伸
+                 y: lash[0].y + (lash[0].y - lash[1].y) * 0.8 };
+  const tail = { x: lash[n-1].x + (lash[n-1].x - lash[n-2].x) * 1.6,   // 眼尾外扩~20%(1.6段)
                  y: lash[n-1].y + (lash[n-1].y - lash[n-2].y) * 1.6 };
-  const pts = lash.concat([tail]);
+  const pts = [head].concat(lash, [tail]);
   const browBotY = arc === EYE_L ? sp(52).y : sp(282).y;  // 本侧眉下缘中点
   const lift = Math.max(4, (lash[Math.floor(n / 2)].y - browBotY) * 0.70);
   const up = pts.map((p, k) => {
-    const t = Math.min(1, k / (n - 1));
+    const t = Math.max(0, Math.min(1, (k - 1) / (n - 1)));
     return { x: p.x, y: p.y - lift * (0.55 + 0.45 * Math.sin(Math.PI * t)) };   // 端点抬高:眼角/眼尾可涂满
   });
   return pts.map(p => [p.x, p.y]).concat(up.reverse().map(p => [p.x, p.y]));
@@ -1898,6 +1935,8 @@ window.__msDebug = () => ({
     lipB: [(S.lm[17].x + S.lm[14].x) / 2, (S.lm[17].y + S.lm[14].y) / 2],   // 下唇带中点
     browLS: [sp(105).x, sp(105).y],                                          // 二次平滑后的左眉峰(测抖动)
     browBotL: [sp(52).x, sp(52).y],                                          // 左眉下缘中点(眼锁区上界)
+    browC: browCenter(BROW_L_TOP, BROW_L_BOT),                               // 贴合修正后左眉中心(采样锚点)
+    eyeInnerL: [sp(133).x, sp(133).y],                                       // 左内眼角
     lipT: [(S.lm[0].x + S.lm[13].x) / 2, (S.lm[0].y + S.lm[13].y) / 2],      // 上唇带中点
     mw: Math.hypot(S.lm[291].x - S.lm[61].x, S.lm[291].y - S.lm[61].y) } : null,
   fieldSum: { lip: FIELD.lip.dens.reduce((a, b) => a + b, 0),

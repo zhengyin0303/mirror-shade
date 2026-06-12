@@ -85,7 +85,7 @@ const t = (name, ok, extra) => {
   const refresh = async () => { D = await dbg(); };
   const lipRG  = async () => rgAt(D.lm.lipB[0], D.lm.lipB[1], 6);
   const cheekRG = async () => rgAt(D.lm.cheekL[0], D.lm.cheekL[1], 8);
-  const browLum = async () => lumAt(D.lm.browL[0], D.lm.browL[1], 10);
+  const browLum = async () => lumAt(D.lm.browC[0], D.lm.browC[1], 10);   // v3.2.1-④:修正后眉心采样
   const eyeRG  = async () => rgAt(D.lm.eyeL[0], D.lm.eyeL[1] - D.lm.mw * 0.16, 7);
 
   await page.goto(ORIGIN + "/");
@@ -161,6 +161,16 @@ const t = (name, ok, extra) => {
   const lipDens = (await dbg()).fieldSum.lip;
   t("手指涂抹唇部上色(R-G抬升+顶点浓度>0)", lipSm1 > lipSm0 + 12 && lipDens > 0.5,
     `${lipSm0.toFixed(0)}→${lipSm1.toFixed(0)},浓度和${lipDens.toFixed(1)}`);
+  // v3.2.1-②:带中线有中线顶点,单次轻触即可上色(中央涂不满修复)
+  await page.click("#clearBtn");
+  await page.waitForTimeout(250);
+  await page.locator(".sw").first().click();
+  await page.waitForTimeout(200);
+  const midBare = await lipRG();
+  await drag([[D.lm.lipB[0], D.lm.lipB[1]], [D.lm.lipB[0], D.lm.lipB[1]]]);   // 单点tap带中线
+  await page.waitForTimeout(280);
+  const midTap = await lipRG();
+  t("唇带中线单触即上色(中线顶点)", midTap > midBare + 8, `${midBare.toFixed(0)}→${midTap.toFixed(0)}`);
 
   // v3.2-§1:张嘴连续性——浓度场随顶点形变,上下唇带均保持覆盖,口腔开口不染色
   await page.click('[data-m="oneclick"]');
@@ -521,6 +531,15 @@ const t = (name, ok, extra) => {
   const extAfter = await rgAt(extPt[0], extPt[1], 5);
   t("眼尾外扩区可涂(锁区外扩~20%)", extAfter > extBefore + 6,
     `${extBefore.toFixed(0)}→${extAfter.toFixed(0)}`);
+
+  // v3.2.1-③:内眼角侧同样可涂(子网格与锁区完整含内外眼角)
+  const inn = D.lm.eyeInnerL;
+  const innPt = [inn[0] + (inn[0] - D.lm.eyeL[0]) * 0.15, inn[1] - 10];
+  const innBefore = await rgAt(innPt[0], innPt[1], 5);
+  await rub(innPt[0], innPt[1], 14);
+  const innAfter = await rgAt(innPt[0], innPt[1], 5);
+  t("内眼角区可涂(子网格含眼角)", innAfter > innBefore + 6,
+    `${innBefore.toFixed(0)}→${innAfter.toFixed(0)}`);
 
   // v3.1-C2:笔触为沿睑切线压扁的椭圆——单点轻触,横向同距有色、纵向无色
   await page.click('[data-m="oneclick"]');
