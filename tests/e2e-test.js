@@ -342,6 +342,13 @@ const t = (name, ok, extra) => {
     `唇${lipAfterAll.toFixed(0)} 颊${cheekAfterAll.toFixed(0)} 眼${eyeAfterAll.toFixed(0)}`);
   t("长按Clear提示全卸文案", hintAll.includes("已全部卸妆"), hintAll);
   t("长按Clear后无选中色", (await page.locator("#swatches .sw.on").count()) === 0);
+  // v3.2-§2.1:长按目标关闭浏览器原生触摸行为
+  const lpCss = await page.locator("#clearBtn").evaluate(el => {
+    const s = getComputedStyle(el);
+    return { ta: s.touchAction, us: s.userSelect || s.webkitUserSelect };
+  });
+  t("Clear按钮 touch-action=manipulation 且禁选词", lpCss.ta === "manipulation" && lpCss.us === "none",
+    JSON.stringify(lpCss));
 
   // v3.1-B:位移超过25px容差则长按取消,不全卸
   await page.locator(".sw").first().click();                      // 唇上色(当前在唇妆页签)
