@@ -155,7 +155,27 @@ const t = (name, ok, extra) => {
   const lipSm0 = await lipRG();
   await rub(D.lm.lipB[0], D.lm.lipB[1], 30);                      // 沿下唇带来回涂
   const lipSm1 = await lipRG();
-  t("手指涂抹唇部上色(R-G抬升)", lipSm1 > lipSm0 + 12, `${lipSm0.toFixed(0)}→${lipSm1.toFixed(0)}`);
+  const lipDens = (await dbg()).fieldSum.lip;
+  t("手指涂抹唇部上色(R-G抬升+顶点浓度>0)", lipSm1 > lipSm0 + 12 && lipDens > 0.5,
+    `${lipSm0.toFixed(0)}→${lipSm1.toFixed(0)},浓度和${lipDens.toFixed(1)}`);
+
+  // v3.2-§1:张嘴连续性——浓度场随顶点形变,上下唇带均保持覆盖,口腔开口不染色
+  await page.click('[data-m="oneclick"]');
+  await page.locator(".sw").first().click();                      // 整唇上色
+  await page.click('[data-m="smear"]');                           // 切手涂:浓度场铺满(40顶点=1)
+  await page.waitForTimeout(250);
+  await page.evaluate(() => { window.__face.mouthOpen = 0.05; }); // 张嘴:下唇环整体下移
+  await page.waitForTimeout(500);
+  await refresh();
+  const openT = await rgAt(D.lm.lipT[0], D.lm.lipT[1], 5);        // 上唇带(原位)
+  const openB = await rgAt(D.lm.lipB[0], D.lm.lipB[1], 5);        // 下唇带(已随张嘴下移)
+  const gapPt = [(D.lm.lipT[0] + D.lm.lipB[0]) / 2, (D.lm.lipT[1] + D.lm.lipB[1]) / 2];
+  const openGap = await rgAt(gapPt[0], gapPt[1], 5);
+  t("张嘴后上唇带保持覆盖", openT > openGap + 12, `上${openT.toFixed(0)} vs 口腔${openGap.toFixed(0)}`);
+  t("张嘴后下唇带跟随且不断裂", openB > openGap + 12, `下${openB.toFixed(0)} vs 口腔${openGap.toFixed(0)}`);
+  await page.evaluate(() => { window.__face.mouthOpen = 0; });
+  await page.waitForTimeout(400);
+  await refresh();
 
   /* ========== 唇妆:唇型 ========== */
   await page.click('[data-m="shape"]');

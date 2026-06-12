@@ -41,6 +41,13 @@
       set(id, cx + 0.085 * Math.cos(a), cy + 0.040 * Math.sin(a)); });
     INNER.forEach((id, j) => { const a = Math.PI - j * Math.PI / 10;
       set(id, cx + 0.055 * Math.cos(a), cy + 0.018 * Math.sin(a)); });
+    // 张嘴模拟:window.__face.mouthOpen = k(归一化)→ 下唇外环+下唇内环整体下移,
+    // 上下内环之间形成口腔开口(用于唇手涂"张嘴不断裂"断言)
+    const mo = window.__face.mouthOpen || 0;
+    if (mo) {
+      for (const id of [146,91,181,84,17,314,405,321,375]) pts[id].y += mo;
+      for (const id of [95,88,178,87,14,317,402,318,324]) pts[id].y += mo;
+    }
     return pts;
   }
 

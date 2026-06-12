@@ -799,6 +799,66 @@ function eyePearl(f, it) {                                // 珠光:强度介于
   ctx.drawImage(glossC, 0, 0); ctx.restore();
 }
 
+/* ====================================================================
+   v3.2-§1:手涂层 = 面部网格浓度场
+   涂抹数据不再是平面位图,而是品类子网格顶点上的浓度数组:
+   涂抹时向触点周边顶点按刷径高斯衰减累加浓度(卸妆棉为负向);
+   渲染时按【当帧】顶点位置以柔边光斑重建蒙版,再走现有 compositeMask。
+   顶点随面部网格形变 → 张嘴/鼓腮/转头透视自然跟随;浓度只存在于
+   品类子网格上,锁区天然成立。
+==================================================================== */
+function mkField(n) { return { dens: new Float32Array(n), nodes: [], has: false }; }
+const FIELD = { lip: mkField(40), blush: mkField(14), eye: mkField(20) };
+function clearField(key) { const F = FIELD[key]; if (F) { F.dens.fill(0); F.has = false; } }
+const BRUSH_SCALE = { lip: 1.6, blush: 1.8, eye: 1.4 };  // 刷径按区域尺度等比(沿用旧仿射span值)
+
+function lipFieldNodes(f) {                              // 唇:外环20+内环20(含唇形偏移,与渲染路径一致)
+  const br = f.mw * 0.11;
+  return ringPts(OUTER, f, 1).concat(ringPts(INNER, f, 0.5)).map(p => [p[0], p[1], br]);
+}
+function fieldNodes(key, f) {
+  if (key === "lip") return lipFieldNodes(f);
+  if (key === "blush") return blushFieldNodes();
+  return eyeFieldNodes();
+}
+function fieldStroke(key, x, y, frame) {                 // 触点向周边顶点高斯累加
+  const F = FIELD[key];
+  F.nodes = fieldNodes(key, key === "lip" ? mouthFrame() : frame);
+  const rb = (S.brush === "big" ? 56 : 30) / 512 * BRUSH_SCALE[key] * frame.mw;
+  const k = S.eraser ? -0.5 : (S.brush === "big" ? 0.12 : 0.16);
+  let any = false;
+  for (let i = 0; i < F.nodes.length; i++) {
+    let dx = F.nodes[i][0] - x, dy = F.nodes[i][1] - y;
+    if (key === "eye" && !S.eraser) {                    // 晕染笔触:沿眼轴2.2:1压扁的椭圆衰减
+      const du = dx * frame.ux + dy * frame.uy, dv = dx * frame.vx + dy * frame.vy;
+      dx = du / 1.48; dy = dv / 0.673;
+    }
+    const w = Math.exp(-(dx * dx + dy * dy) / (2 * rb * rb * 0.35));
+    if (w < 0.02) continue;
+    F.dens[i] = clamp(F.dens[i] + k * w, 0, 1);
+    any = true;
+  }
+  if (S.eraser) { let h = false; for (const d of F.dens) if (d > 0.01) { h = true; break; } F.has = h; }
+  else if (any) F.has = true;
+}
+function drawField(key, f, clip) {                       // 按当帧顶点位置重建蒙版(画入 maskC)
+  const F = FIELD[key];
+  F.nodes = fieldNodes(key, f);
+  maskX.save();
+  clip();
+  for (let i = 0; i < F.nodes.length; i++) {
+    const d = F.dens[i]; if (d < 0.01) continue;
+    const [x, y, br] = F.nodes[i];
+    const g = maskX.createRadialGradient(x, y, 0, x, y, br);
+    g.addColorStop(0, `rgba(255,255,255,${Math.min(1, d)})`);
+    g.addColorStop(0.65, `rgba(255,255,255,${d * 0.55})`);
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    maskX.fillStyle = g;
+    maskX.beginPath(); maskX.arc(x, y, br, 0, Math.PI * 2); maskX.fill();
+  }
+  maskX.restore();
+}
+
 /* ---------- v3.1-A:品类锚点二次平滑层(独立于唇妆路径,唇妆零改动) ----------
    眉/眼/颊妆面直接用原始点且区域纹理弱,MediaPipe 噪声放大视觉抖动。
    在全局平滑之上对品类锚点再做一次帧间自适应 EMA:位移小强平滑,位移大全速放行。 */
@@ -993,13 +1053,8 @@ function drawLips(f) {
     try { maskX.filter = "none"; } catch (e) {}
     maskX.restore();
   } else {
-    maskX.save();
-    buildLipPath(maskX, f); maskX.clip("evenodd");        // 锁区:涂出界自动裁掉
-    const m = paintMatrix(f, SMEAR_CFG.lip);
-    maskX.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
-    maskX.drawImage(PAINT.lip.c, 0, 0);
-    maskX.setTransform(1, 0, 0, 1, 0, 0);
-    maskX.restore();
+    // v3.2:浓度场重建蒙版;唇路径裁切(护牙),张嘴时顶点分离自然不断裂
+    drawField("lip", f, () => { buildLipPath(maskX, f); maskX.clip("evenodd"); });
   }
   // 2) 蒙版着色
   maskX.save();
@@ -1208,7 +1263,7 @@ function buildSwatches() {
       document.documentElement.style.setProperty("--accent", p.c);   // 界面强调色随口红走
       box.querySelectorAll(".sw").forEach(s => s.classList.remove("on"));
       el.classList.add("on");
-      if (S.lip.mode === "smear" && !PAINT.lip.has) hint("用手指在嘴唇上来回涂抹,反复叠涂颜色会更浓");
+      if (S.lip.mode === "smear" && !FIELD.lip.has) hint("用手指在嘴唇上来回涂抹,反复叠涂颜色会更浓");
       else wdWarnIfDupe(p.c, S.lip.texture);               // 撞色预警
     });
     attachLongPress(el, () => {                            // 长按色板:收藏入衣橱
@@ -1373,8 +1428,8 @@ function setLipMode(m) {
   if (m === "shape" && S.lip.mode !== "shape") S.lip.prevMode = S.lip.mode;
   if (m === "oneclick") S.lip.maskMode = "full";
   if (m === "smear") {
-    if (S.lip.maskMode === "full" && S.lip.color && !PAINT.lip.has) {   // 从整唇切来且涂层为空:铺满,可局部擦除
-      PAINT.lip.x.fillStyle = "#fff"; PAINT.lip.x.fillRect(0, 0, PW, PH); PAINT.lip.has = true;
+    if (S.lip.maskMode === "full" && S.lip.color && !FIELD.lip.has) {   // 从整唇切来且涂层为空:铺满,可局部擦除
+      FIELD.lip.dens.fill(1); FIELD.lip.has = true;
     }
     S.lip.maskMode = "paint";
     if (!S.lip.color) hint("先在色板选一支口红,再用手指涂抹");
@@ -1521,6 +1576,7 @@ function eyeStampAngle(px, py, f) {                       // 涂抹层空间内,
   return ang;
 }
 function stampTo(x, y, tgt) {
+  if (tgt.key === "lip") return fieldStroke("lip", x, y, tgt.frame);   // v3.2:唇走浓度场
   const [px, py] = toPaintXY(x, y, tgt.frame, SMEAR_CFG[tgt.key]);
   const r = S.brush === "big" ? 56 : 30;
   const shape = (tgt.key === "eye" && !S.eraser)
@@ -1568,7 +1624,8 @@ $("zoomOut").addEventListener("click", () => {
 /* Clear:点击只卸当前品类;长按550ms全品类卸妆(衣橱页签作用于唇妆) */
 function clearCat(key) {
   S[key].color = null;
-  clearPaint(key);                                       // 该品类手涂层一并清空
+  clearField(key);                                       // 该品类手涂浓度场一并清空
+  clearPaint(key);                                       // (位图层,迁移完成后删除)
   document.querySelectorAll("#swatches .sw").forEach(s => s.classList.remove("on"));
 }
 function clearAll() {
@@ -1883,7 +1940,11 @@ window.__msDebug = () => ({
     lipB: [(S.lm[17].x + S.lm[14].x) / 2, (S.lm[17].y + S.lm[14].y) / 2],   // 下唇带中点
     browLS: [sp(105).x, sp(105).y],                                          // 二次平滑后的左眉峰(测抖动)
     browBotL: [sp(52).x, sp(52).y],                                          // 左眉下缘中点(眼锁区上界)
+    lipT: [(S.lm[0].x + S.lm[13].x) / 2, (S.lm[0].y + S.lm[13].y) / 2],      // 上唇带中点
     mw: Math.hypot(S.lm[291].x - S.lm[61].x, S.lm[291].y - S.lm[61].y) } : null,
+  fieldSum: { lip: FIELD.lip.dens.reduce((a, b) => a + b, 0),
+              blush: FIELD.blush.dens.reduce((a, b) => a + b, 0),
+              eye: FIELD.eye.dens.reduce((a, b) => a + b, 0) },
   W: cv.width, H: cv.height });
 
 setCat("lip");
