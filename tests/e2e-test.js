@@ -115,6 +115,20 @@ const t = (name, ok, extra) => {
   t("一级页签固定五品类", JSON.stringify(catTabs) === JSON.stringify(["唇妆", "腮红", "眉妆", "眼影", "衣橱"]),
     catTabs.join("/"));
 
+  // v3.1-E:快门为镜区右下浮钮,五页签完整可见且不被遮挡
+  t("快门钮位于镜区(#stage)内", (await page.locator("#stage > #shotBtn").count()) === 1);
+  const shotBox = await page.locator("#shotBtn").boundingBox();
+  const panelBox = await page.locator("#panel").boundingBox();
+  let tabsVisible = true, maxRight = 0;
+  for (const tb of await page.locator(".tab").all()) {
+    const b = await tb.boundingBox();
+    if (!b || b.x < 0 || b.x + b.width > 390) tabsVisible = false;
+    maxRight = Math.max(maxRight, b ? b.x + b.width : 999);
+  }
+  t("五个页签完整可见于390px视口", tabsVisible, `最右=${maxRight.toFixed(0)}px`);
+  t("快门钮不与控制面板重叠", shotBox.y + shotBox.height <= panelBox.y + 1,
+    `快门底=${(shotBox.y + shotBox.height).toFixed(0)} 面板顶=${panelBox.y.toFixed(0)}`);
+
   /* ========== 唇妆:一键试色 ========== */
   const lipModes = await page.locator("#tools [data-m]").allTextContents();
   t("唇妆二级模式齐全(一键/亲手/唇型)",

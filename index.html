@@ -102,9 +102,12 @@
   .tab { padding: 7px 15px; border-radius: 999px; font-size: 13px; color: var(--muted);
     border: 1px solid transparent; }
   .tab.on { color: var(--txt); border-color: var(--accent); }
-  #shotBtn { margin-left: auto; width: 36px; height: 36px; border-radius: 50%;
-    border: 2px solid var(--txt); display: flex; align-items: center; justify-content: center; }
-  #shotBtn::after { content: ""; width: 24px; height: 24px; border-radius: 50%; background: var(--txt); }
+  /* v3.1-E:快门移出面板,镜区右下浮动圆钮(避开右上缩放钮),五页签占满整行 */
+  #shotBtn { position: absolute; right: 16px; bottom: 16px; width: 60px; height: 60px;
+    border-radius: 50%; background: rgba(16,15,14,.45); backdrop-filter: blur(8px);
+    border: 2px solid rgba(255,255,255,.9); display: flex; align-items: center;
+    justify-content: center; z-index: 4; }
+  #shotBtn::after { content: ""; width: 42px; height: 42px; border-radius: 50%; background: var(--txt); }
   #shotBtn:active::after { background: var(--accent); }
 
   /* 色板 */
@@ -219,6 +222,7 @@
   <button id="skinBadge" aria-label="查看肤色结果">暖皮</button>
   <div id="compareTag">素 颜</div>
   <div id="flash"></div>
+  <button id="shotBtn" title="拍照保存" aria-label="拍照保存"></button>
   <button id="zoomIn" aria-label="放大">＋</button>
   <span id="zoomVal">1x</span>
   <button id="zoomOut" aria-label="缩小">−</button>
@@ -249,7 +253,6 @@
       <button class="tab" data-cat="eye">眼影</button>
       <button class="tab" data-cat="wardrobe">衣橱</button>
     </div>
-    <button id="shotBtn" title="拍照保存" aria-label="拍照保存"></button>
   </div>
 
   <div class="row" id="swatches"></div>
