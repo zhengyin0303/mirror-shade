@@ -62,6 +62,9 @@
   #compareTag { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
     background: rgba(16,15,14,.72); padding: 6px 18px; border-radius: 999px; font-size: 13px;
     letter-spacing: .2em; display: none; }
+  #flash { position: absolute; inset: 0; background: #fff; opacity: 0;
+    pointer-events: none; transition: opacity .12s; z-index: 5; }
+  #flash.show { opacity: .85; transition: none; }
   #zoomIn, #zoomOut { position: absolute; right: 12px; width: 44px; height: 44px;
     border-radius: 50%; background: rgba(16,15,14,.72); backdrop-filter: blur(8px);
     color: var(--txt); font-size: 20px; border: 1px solid var(--line); }
@@ -215,6 +218,7 @@
   </div>
   <button id="skinBadge" aria-label="查看肤色结果">暖皮</button>
   <div id="compareTag">素 颜</div>
+  <div id="flash"></div>
   <button id="zoomIn" aria-label="放大">＋</button>
   <span id="zoomVal">1x</span>
   <button id="zoomOut" aria-label="缩小">−</button>
@@ -1541,10 +1545,12 @@ cmp.addEventListener("pointerleave", cmpOff);
 cmp.addEventListener("contextmenu", e => e.preventDefault());
 
 $("shotBtn").addEventListener("click", () => {
+  $("flash").classList.add("show");                             // 快门白闪:即时反馈
+  setTimeout(() => $("flash").classList.remove("show"), 80);
   cv.toBlob(async blob => {
     if (!blob) { hint("拍照失败,可截屏代替"); return; }
-    const name = `试妆_${S.lip.color ? S.lip.color.n : "素颜"}.png`;
-    const file = new File([blob], name, { type: "image/png" });
+    const name = `试妆_${S.lip.color ? S.lip.color.n : "素颜"}.jpg`;   // JPEG编码,显著快于PNG
+    const file = new File([blob], name, { type: "image/jpeg" });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file] }); hint("选择\u201c保存图片/相册\u201d即可存入相册"); return; }
       catch (e) { if (e && e.name === "AbortError") return; }   // 用户取消分享
@@ -1554,7 +1560,7 @@ $("shotBtn").addEventListener("click", () => {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     hint("已保存试妆照");
-  }, "image/png");
+  }, "image/jpeg", 0.92);
 });
 
 /* ---------- 品类色板(腮红/眉妆/眼影) ---------- */

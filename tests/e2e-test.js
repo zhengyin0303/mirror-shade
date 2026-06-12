@@ -320,10 +320,20 @@ const t = (name, ok, extra) => {
   /* ========== 拍照与运动跟随 ========== */
   await page.click('.tab[data-cat="lip"]');
   await page.locator(".sw").first().click();
+  const flashSeen = page.evaluate(() => new Promise(res => {       // v3.1-D:监听白闪class
+    const f = document.getElementById("flash");
+    const mo = new MutationObserver(() => {
+      if (f.classList.contains("show")) { mo.disconnect(); res(true); }
+    });
+    mo.observe(f, { attributes: true });
+    setTimeout(() => { mo.disconnect(); res(false); }, 3000);
+  }));
   const dl = page.waitForEvent("download", { timeout: 8000 }).catch(() => null);
   await page.click("#shotBtn");
   const download = await dl;
-  t("拍照成功产出图片文件", !!download, download ? download.suggestedFilename() : "无下载事件");
+  const fname = download ? download.suggestedFilename() : "无下载事件";
+  t("拍照成功产出JPEG图片文件", !!download && fname.endsWith(".jpg"), fname);
+  t("快门按下出现白闪反馈", await flashSeen);
 
   await page.evaluate(() => { window.__face.dx = 0.06; window.__face.dy = 0.03; });
   await page.waitForTimeout(600);
