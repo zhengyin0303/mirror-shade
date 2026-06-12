@@ -688,6 +688,58 @@ function render() {
   smoothAnchors();                                       // v3.1-A:品类锚点二次平滑
   drawMakeup(f);
   if (S.cat === "lip" && S.lip.mode === "shape" && S.compare !== "lip") drawShapeUI(f);
+  if (DEBUG) drawDebug(f);                               // v3.2-§3:?debug=1 调试叠加
+}
+
+/* ---------- v3.2-§3 调试模式:蒙版轮廓 + 锚点 + 帧率(?debug=1) ---------- */
+const DEBUG = new URLSearchParams(location.search).get("debug") === "1";
+let dbgFrames = [];
+function dbgStroke(pts, color, close) {
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  if (close !== false) ctx.closePath();
+  ctx.stroke(); ctx.restore();
+}
+function dbgDot(p, color) {
+  ctx.save(); ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+}
+function drawDebug(f) {
+  // 帧率(30帧滚动均值)
+  const now = performance.now();
+  dbgFrames.push(now);
+  if (dbgFrames.length > 30) dbgFrames.shift();
+  const fps = dbgFrames.length > 1
+    ? Math.round(1000 * (dbgFrames.length - 1) / (now - dbgFrames[0])) : 0;
+  window.__msFps = fps;
+  ctx.save();
+  ctx.font = "bold 26px monospace"; ctx.fillStyle = "#0f0";
+  ctx.fillText(fps + " fps", 14, 80);
+  ctx.restore();
+  // 唇:外+内环(红)
+  dbgStroke(ringPts(OUTER, f, 1), "#FF4D4D");
+  dbgStroke(ringPts(INNER, f, 0.5), "#FF4D4D");
+  // 眉:多边形(黄)+ 眉峰锚点
+  dbgStroke(browPoly(BROW_L_TOP, BROW_L_BOT, f), "#FFD24D");
+  dbgStroke(browPoly(BROW_R_TOP, BROW_R_BOT, f), "#FFD24D");
+  dbgDot(sp(105), "#FFD24D"); dbgDot(sp(334), "#FFD24D");
+  // 眼影:渲染带(紫)+ 手涂锁区(紫虚)+ 眼角锚点
+  dbgStroke(eyePoly(EYE_L, f, 0, 1), "#B98CFF");
+  dbgStroke(eyePoly(EYE_R, f, 0, 1), "#B98CFF");
+  dbgStroke(eyeLockPoly(EYE_L), "#7E5BD6");
+  dbgStroke(eyeLockPoly(EYE_R), "#7E5BD6");
+  dbgDot(sp(33), "#B98CFF"); dbgDot(sp(263), "#B98CFF");
+  // 腮红:锁区椭圆近似(粉)+ 颧点/鬓侧/鼻翼锚点
+  const r = f.mw * 0.52 * 1.1;
+  for (const id of [205, 425]) {
+    const P = sp(id), e = [];
+    for (let a = 0; a <= 32; a++)
+      e.push([P.x + r * Math.cos(a / 16 * Math.PI), P.y + r * 0.8 * Math.sin(a / 16 * Math.PI)]);
+    dbgStroke(e, "#FF8CC6");
+    dbgDot(P, "#FF8CC6");
+  }
+  for (const id of [234, 454, 129, 358]) dbgDot(sp(id), "#FF8CC6");
 }
 
 /* ---------- 妆容渲染:按住对比时仅跳过当前品类 ---------- */
