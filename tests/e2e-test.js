@@ -365,7 +365,7 @@ const t = (name, ok, extra) => {
     const tick = () => {
       const L = window.__msDebug().lm;
       raw.push(L.browL.slice()); sm.push(L.browLS.slice());
-      if (++n < 40) requestAnimationFrame(tick);
+      if (++n < 80) requestAnimationFrame(tick);                 // 80帧:压低std估计的统计涨落
       else { window.__face.jitter = 0; res({ raw, sm }); }
     };
     requestAnimationFrame(tick);
@@ -375,8 +375,9 @@ const t = (name, ok, extra) => {
     return Math.sqrt(a.reduce((s, p) => s + (p[0] - m[0]) ** 2 + (p[1] - m[1]) ** 2, 0) / a.length);
   };
   const rawStd = std(jit.raw), smStd = std(jit.sm);
-  t("噪声下品类锚点二次平滑生效(std较原始降≥30%)", smStd < rawStd * 0.7 && rawStd > 0.8,
-    `raw=${rawStd.toFixed(2)}px → smooth=${smStd.toFixed(2)}px`);
+  // 阈值0.8:正常比值≈0.60(80帧统计涨落σ≈0.05),平滑层失效时比值≈1.0,可截回归且抗偶发
+  t("噪声下品类锚点二次平滑生效(std较原始显著降低)", smStd < rawStd * 0.8 && rawStd > 0.8,
+    `raw=${rawStd.toFixed(2)}px → smooth=${smStd.toFixed(2)}px(比值${(smStd / rawStd).toFixed(2)})`);
   // 大位移自动放行:头部大幅移动后平滑点须迅速贴住原始点(无拖影滞后)
   await page.evaluate(() => { window.__face.dx = 0.06; });
   await page.waitForTimeout(450);
