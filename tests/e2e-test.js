@@ -91,9 +91,9 @@ const t = (name, ok, extra) => {
   await page.goto(ORIGIN + "/");
 
   /* ========== 启动与肤色分析 ========== */
-  t("启动页渲染(品牌字+开始按钮+隐私声明+v3.0标记)",
+  t("启动页渲染(品牌字+开始按钮+隐私声明+v3.2标记)",
     await page.locator("#startBtn").isVisible() && await page.locator(".privacy").isVisible()
-    && (await page.locator("#startScreen").textContent()).includes("v3.0"));
+    && (await page.locator("#startScreen").textContent()).includes("v3.2"));
 
   await page.click("#startBtn");
   await page.waitForSelector("#startScreen", { state: "hidden", timeout: 15000 }).catch(() => {});
@@ -633,6 +633,15 @@ const t = (name, ok, extra) => {
   const pr = parseInt(pColor.slice(1, 3), 16), pg = parseInt(pColor.slice(3, 5), 16);
   t("照片取色提取出口红色(红色系)", pr > 120 && pr > pg + 50, "取色=" + pColor);
   await page.evaluate(() => document.getElementById("wdModal").classList.remove("show"));
+
+  /* ========== v3.2-§3:调试模式 ========== */
+  t("默认页无调试痕迹(__msFps未定义)", await page.evaluate(() => typeof window.__msFps === "undefined"));
+  await page.goto(ORIGIN + "/?debug=1");
+  await page.click("#startBtn");
+  await page.waitForSelector("#skinChip.show", { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(800);
+  const dbgFps = await page.evaluate(() => window.__msFps);
+  t("调试模式叠加帧率(__msFps>0)", typeof dbgFps === "number" && dbgFps > 0, `fps=${dbgFps}`);
 
   /* ========== 收尾 ========== */
   await page.waitForTimeout(400);
