@@ -70,10 +70,14 @@ const t = (name, ok, extra) => {
       await drag([[cx2 - half, cy2], [cx2 + half, cy2], [cx2 - half, cy2]]);
     await page.waitForTimeout(280);
   };
-  const longPress = async sel => {
-    await page.locator(sel).dispatchEvent("pointerdown");
-    await page.waitForTimeout(700);
-    await page.locator(sel).dispatchEvent("pointerup");
+  const pressDrift = async (sel, drift) => {                       // 按住550ms+期间水平微动drift px
+    const box = await page.locator(sel).boundingBox();
+    const cx2 = box.x + box.width / 2, cy2 = box.y + box.height / 2;
+    await page.mouse.move(cx2, cy2); await page.mouse.down();
+    await page.waitForTimeout(180);
+    await page.mouse.move(cx2 + drift, cy2, { steps: 3 });
+    await page.waitForTimeout(580);
+    await page.mouse.up();
     await page.waitForTimeout(280);
   };
   // 各品类锚点采样(冻结帧下确定):唇=下唇带,腮红=左颧,眉=左眉峰(亮度),眼=上睑带
@@ -292,14 +296,26 @@ const t = (name, ok, extra) => {
   await page.click('.tab[data-cat="blush"]'); await page.locator("#swatches .sw").first().click();
   await page.click('.tab[data-cat="eye"]'); await page.locator("#swatches .sw").first().click();
   await page.waitForTimeout(380);
-  await longPress("#clearBtn");
+  await pressDrift("#clearBtn", 15);                              // v3.1-B:按住带15px微动仍触发(tol=25)
   const hintAll = await page.locator("#hint").textContent();
   const lipAfterAll = await lipRG(), cheekAfterAll = await cheekRG(), eyeAfterAll = await eyeRG();
-  t("长按Clear全品类卸妆(唇·颊·眼像素全回落)",
+  t("长按Clear(带15px微动)全品类卸妆(唇·颊·眼像素全回落)",
     lipAfterAll < lipNow - 25 && cheekAfterAll < cheekOn - 10 && eyeAfterAll < eyeOn - 8,
     `唇${lipAfterAll.toFixed(0)} 颊${cheekAfterAll.toFixed(0)} 眼${eyeAfterAll.toFixed(0)}`);
   t("长按Clear提示全卸文案", hintAll.includes("已全部卸妆"), hintAll);
   t("长按Clear后无选中色", (await page.locator("#swatches .sw.on").count()) === 0);
+
+  // v3.1-B:位移超过25px容差则长按取消,不全卸
+  await page.locator(".sw").first().click();                      // 唇上色(当前在唇妆页签)
+  await page.click('.tab[data-cat="blush"]');
+  await page.locator("#swatches .sw").first().click();            // 腮红上色
+  await page.click('.tab[data-cat="lip"]');
+  await page.waitForTimeout(380);
+  await pressDrift("#clearBtn", 60);                              // 60px大幅滑动:取消长按
+  const cheekStillOn = await cheekRG();
+  t("长按位移超容差(60px)取消,不触发全卸(腮红保留)", cheekStillOn > bareCheek + 10,
+    `颊R-G=${cheekStillOn.toFixed(0)}`);
+  await pressDrift("#clearBtn", 0);                               // 复位:全卸还原基台
 
   /* ========== 拍照与运动跟随 ========== */
   await page.click('.tab[data-cat="lip"]');

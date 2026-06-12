@@ -1136,15 +1136,16 @@ function buildSwatches() {
     box.appendChild(el);
   }
 }
-function attachLongPress(el, fn) {
+function attachLongPress(el, fn, moveTol) {
   let timer = null, sx = 0, sy = 0;
+  const tol = moveTol || 10;            // 色板/收纳项=10防滑动误触;按钮类可放宽(真机手指必然微动)
   const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
   el.addEventListener("pointerdown", e => {
     sx = e.clientX; sy = e.clientY;
     timer = setTimeout(() => { timer = null; fn(); }, 550);
   });
   el.addEventListener("pointermove", e => {
-    if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) clear();
+    if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > tol) clear();
   });
   ["pointerup", "pointerleave", "pointercancel"].forEach(ev => el.addEventListener(ev, clear));
   el.addEventListener("contextmenu", e => e.preventDefault());
@@ -1480,7 +1481,11 @@ $("clearBtn").addEventListener("click", () => {
   clearCat(key);
   hint(`已卸除${CAT_NAME[key]}`);
 });
-attachLongPress($("clearBtn"), () => { clearLongPressed = true; clearAll(); });
+attachLongPress($("clearBtn"), () => {
+  clearLongPressed = true;
+  if (navigator.vibrate) navigator.vibrate(30);          // 长按触发的触感反馈
+  clearAll();
+}, 25);                                                  // 真机按住550ms手指必然微动:Clear放宽到25px
 
 /* 按住对比:仅当前品类不渲染,其余品类保留(衣橱页签对比唇妆) */
 const cmp = $("compareBtn");
