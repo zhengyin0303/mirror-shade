@@ -94,8 +94,9 @@
   /* ---------- 控制面板 ---------- */
   #panel { position: fixed; left: 0; right: 0; bottom: 0; min-height: 218px; background: var(--panel);
     border-top: 1px solid var(--line); padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
-    display: flex; flex-direction: column; gap: 9px; z-index: 10; }
+    display: flex; flex-direction: column; gap: 9px; z-index: 10; align-items: center; }
   .row { display: flex; align-items: center; gap: 8px; }
+  #panel > .row { width: 100%; max-width: 600px; }   /* v3.2.1-⑧:大屏面板内容居中适配 */
 
   /* 模式标签 */
   #tabs { gap: 4px; }
@@ -693,7 +694,8 @@ function drawDebug(f) {
   window.__msFps = fps;
   ctx.save();
   ctx.font = "bold 26px monospace"; ctx.fillStyle = "#0f0";
-  ctx.fillText(fps + " fps", 14, 80);
+  ctx.textAlign = "right";                                 // v3.2.1-⑦:右上角,避让缩放钮(占内部约120px)
+  ctx.fillText(fps + " fps", cv.width - 130, 80);
   ctx.restore();
   // 唇:外+内环(红)
   dbgStroke(ringPts(OUTER, f, 1), "#FF4D4D");
@@ -1185,7 +1187,7 @@ function finishAnalysis() {
   S.phase = "live"; hideHint();
   applyTone();
   $("skinChip").classList.add("show"); $("skinBadge").classList.remove("show");
-  hint("在下方挑一支口红试试,带 ★ 的最适合你", true);
+  hint("在下方挑一个颜色上脸试试,带 ★ 的最适合你", true);
   setTimeout(hideHint, 4500);
 }
 function toneText() {

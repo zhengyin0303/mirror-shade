@@ -102,6 +102,9 @@ const t = (name, ok, extra) => {
   await page.waitForSelector("#skinChip.show", { timeout: 25000 }).catch(() => {});
   const chipTxt = await page.locator("#skinTxt").textContent().catch(() => "");
   t("肤色分析完成并显示白话文结果", /你是(暖皮|冷皮|中性皮)/.test(chipTxt), chipTxt.slice(0, 24) + "…");
+  // v3.2.1-①:开场引导文案不再口红专属
+  const hintTxt0 = await page.locator("#hint").textContent();
+  t("开场提示文案为全品类引导", hintTxt0.includes("挑一个颜色上脸试试"), hintTxt0);
   t("分析后不自动上色(无选中色号)", (await page.locator(".sw.on").count()) === 0);
   t("色板含★推荐标记", (await page.locator(".sw.rec").count()) > 0);
 
@@ -642,6 +645,16 @@ const t = (name, ok, extra) => {
   await page.waitForTimeout(800);
   const dbgFps = await page.evaluate(() => window.__msFps);
   t("调试模式叠加帧率(__msFps>0)", typeof dbgFps === "number" && dbgFps > 0, `fps=${dbgFps}`);
+
+  /* ========== v3.2.1-⑧:大屏面板适配 ========== */
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await page.waitForTimeout(500);                                  // 等 relayout
+  const rowBox = await page.locator("#tabs").boundingBox();
+  const centered = Math.abs(rowBox.x - (1024 - rowBox.width) / 2) < 8;
+  t("大屏下面板行≤600px且居中", rowBox.width <= 604 && centered,
+    `宽${rowBox.width.toFixed(0)} x=${rowBox.x.toFixed(0)}`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(400);
 
   /* ========== 收尾 ========== */
   await page.waitForTimeout(400);
