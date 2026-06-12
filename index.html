@@ -358,7 +358,7 @@ const S = {
   blush: { color: null, style: "apple", int: 0.5 },   // 腮红
   brow:  { color: null, shape: "natural", int: 0.5 }, // 眉妆(无质地、无手涂)
   eye:   { color: null, grad: false, int: 0.5 },      // 眼影
-  compare: false,
+  compare: null,            // null | "lip" | "blush" | "brow" | "eye":按住对比的品类
   lm: null,                 // 平滑后的关键点 [ {x,y} ... ] 画布坐标(已镜像)
   lostFrames: 0,
   offsets: {},              // 唇型偏移 { key: {u,v} } 单位=嘴宽比例
@@ -655,16 +655,16 @@ function render() {
   if (S.phase === "analyze") { sampleSkin(); return; }
 
   const f = mouthFrame();
-  if (!S.compare) drawMakeup(f);
-  if (S.cat === "lip" && S.lip.mode === "shape" && !S.compare) drawShapeUI(f);
+  drawMakeup(f);
+  if (S.cat === "lip" && S.lip.mode === "shape" && S.compare !== "lip") drawShapeUI(f);
 }
 
-/* ---------- 妆容渲染 ---------- */
+/* ---------- 妆容渲染:按住对比时仅跳过当前品类 ---------- */
 function drawMakeup(f) {
-  if (S.blush.color) drawBlush(f);
-  if (S.brow.color)  drawBrow(f);
-  if (S.eye.color)   drawEye(f);
-  if (S.lip.color)   drawLips(f);
+  if (S.blush.color && S.compare !== "blush") drawBlush(f);
+  if (S.brow.color  && S.compare !== "brow")  drawBrow(f);
+  if (S.eye.color   && S.compare !== "eye")   drawEye(f);
+  if (S.lip.color   && S.compare !== "lip")   drawLips(f);
 }
 
 /* ---------- 通用蒙版着色合成 ---------- */
@@ -1309,16 +1309,31 @@ $("zoomOut").addEventListener("click", () => {
   else if (S.zoom < 1) hint("已缩小:中间是完整画面,四周是模糊的环境背景");
 });
 
-$("clearBtn").addEventListener("click", () => {
-  S.lip.color = null; paintX.clearRect(0, 0, PW, PH); paintHasContent = false;
-  S.blush.color = null; S.brow.color = null; S.eye.color = null;
-  document.querySelectorAll(".sw").forEach(s => s.classList.remove("on"));
+/* Clear:点击只卸当前品类;长按550ms全品类卸妆(衣橱页签作用于唇妆) */
+function clearCat(key) {
+  S[key].color = null;
+  if (key === "lip") { paintX.clearRect(0, 0, PW, PH); paintHasContent = false; }
+  document.querySelectorAll("#swatches .sw").forEach(s => s.classList.remove("on"));
+}
+function clearAll() {
+  ["lip", "blush", "brow", "eye"].forEach(clearCat);
   hint("已全部卸妆(唇·颊·眉·眼)");
+}
+let clearLongPressed = false;
+$("clearBtn").addEventListener("click", () => {
+  if (clearLongPressed) { clearLongPressed = false; return; }   // 长按触发后吞掉随后的click
+  const key = activeCatKey();
+  clearCat(key);
+  hint(`已卸除${CAT_NAME[key]}`);
 });
+attachLongPress($("clearBtn"), () => { clearLongPressed = true; clearAll(); });
 
+/* 按住对比:仅当前品类不渲染,其余品类保留(衣橱页签对比唇妆) */
 const cmp = $("compareBtn");
-function cmpOn(e)  { e.preventDefault(); S.compare = true;  $("compareTag").style.display = "block"; }
-function cmpOff()  { S.compare = false; $("compareTag").style.display = "none"; }
+function cmpOn(e)  { e.preventDefault(); S.compare = activeCatKey();
+  $("compareTag").textContent = `无${CAT_NAME[S.compare]}`;
+  $("compareTag").style.display = "block"; }
+function cmpOff()  { S.compare = null; $("compareTag").style.display = "none"; }
 cmp.addEventListener("pointerdown", cmpOn);
 cmp.addEventListener("pointerup", cmpOff);
 cmp.addEventListener("pointerleave", cmpOff);
