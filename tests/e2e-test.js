@@ -241,6 +241,10 @@ const t = (name, ok, extra) => {
   await page.waitForTimeout(380);
   const eyeOn = await eyeRG();
   t("选眼影后上睑晕染(R-G抬升)", eyeOn > bareEye + 12, `素${bareEye.toFixed(0)}→妆${eyeOn.toFixed(0)}`);
+  // v3.2-§2.2:一键渲染带覆盖眼尾并外延
+  const tailPt = [D.lm.eyeCornerL[0] + (D.lm.eyeCornerL[0] - D.lm.eyeL[0]) * 0.25, D.lm.eyeCornerL[1] - 14];
+  const tailOn = await rgAt(tailPt[0], tailPt[1], 5);
+  t("一键眼影覆盖眼尾外延区", tailOn > bareEye + 8, `尾${tailOn.toFixed(0)} vs 素${bareEye.toFixed(0)}`);
   await page.click("#eyeGrad");
   t("眼影渐变切换高亮", await page.locator("#eyeGrad").evaluate(el => el.classList.contains("on")));
   await page.click("#eyeSolid");
@@ -505,7 +509,7 @@ const t = (name, ok, extra) => {
   const extBefore = await rgAt(extPt[0], extPt[1], 5);
   await rub(extPt[0], extPt[1], 16);
   const extAfter = await rgAt(extPt[0], extPt[1], 5);
-  t("眼尾外扩区可涂(锁区外扩~15%)", extAfter > extBefore + 6,
+  t("眼尾外扩区可涂(锁区外扩~20%)", extAfter > extBefore + 6,
     `${extBefore.toFixed(0)}→${extAfter.toFixed(0)}`);
 
   // v3.1-C2:笔触为沿睑切线压扁的椭圆——单点轻触,横向同距有色、纵向无色
