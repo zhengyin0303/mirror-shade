@@ -398,6 +398,20 @@ const t = (name, ok, extra) => {
   t("腮红涂出界(额头)自动裁掉", Math.abs(foreAfter - foreBefore) < 6,
     `${foreBefore.toFixed(0)}→${foreAfter.toFixed(0)}`);
 
+  // v3.1-C1:锁区收紧——鼻翼竖线以内涂不上;脸缘以外涂不上
+  const nosePt = [(D.lm.cheekL[0] + D.lm.cheekR[0]) / 2, D.lm.cheekL[1]];
+  const noseBefore = await rgAt(nosePt[0], nosePt[1], 7);
+  await rub(nosePt[0], nosePt[1], 24);
+  const noseAfter = await rgAt(nosePt[0], nosePt[1], 7);
+  t("腮红涂不到鼻区(鼻翼竖线裁切)", Math.abs(noseAfter - noseBefore) < 6,
+    `${noseBefore.toFixed(0)}→${noseAfter.toFixed(0)}`);
+  const outPt = [D.lm.cheekL[0], D.lm.cheekL[1] + D.lm.mw * 0.52 * 1.1 * 0.95 + 26];  // 锁区椭圆颌向外侧
+  const outBefore = await rgAt(outPt[0], outPt[1], 7);
+  await rub(outPt[0], outPt[1], 24);
+  const outAfter = await rgAt(outPt[0], outPt[1], 7);
+  t("腮红涂不出锁区椭圆(颌向下界;脸缘竖线由真机验收)", Math.abs(outAfter - outBefore) < 6,
+    `${outBefore.toFixed(0)}→${outAfter.toFixed(0)}`);
+
   await page.click("#eraserBtn");
   for (let k = 0; k < 5; k++) await rub(ckL[0], ckL[1], 32);
   const cheekErased = await cheekRG();
@@ -431,11 +445,37 @@ const t = (name, ok, extra) => {
   await page.click('[data-m="smear"]');
   await page.locator("#swatches .sw").first().click();
   await page.waitForTimeout(200);
-  const eyePt = [D.lm.eyeL[0], D.lm.eyeL[1] - D.lm.mw * 0.16];
-  const eyeSm0 = await eyeRG();
-  await rub(eyePt[0], eyePt[1], 25);
-  const eyeSm1 = await eyeRG();
+  // v3.1-C2:锁区上界=眉下缘70%,涂点取带内(35%眉眼距)
+  const liftC = (D.lm.eyeL[1] - D.lm.browBotL[1]) * 0.35;
+  const ePt = [D.lm.eyeL[0], D.lm.eyeL[1] - liftC];
+  const eyeSmRG = () => rgAt(ePt[0], ePt[1], 6);
+  const eyeSm0 = await eyeSmRG();
+  await rub(ePt[0], ePt[1], 25);
+  const eyeSm1 = await eyeSmRG();
   t("眼影手涂上色(R-G抬升)", eyeSm1 > eyeSm0 + 8, `${eyeSm0.toFixed(0)}→${eyeSm1.toFixed(0)}`);
+
+  // v3.1-C2:眼尾外扩区可涂(旧锁区止于眼角)
+  const corner = D.lm.eyeCornerL;
+  const extPt = [corner[0] + (corner[0] - D.lm.eyeL[0]) * 0.3, corner[1] - 12];
+  const extBefore = await rgAt(extPt[0], extPt[1], 5);
+  await rub(extPt[0], extPt[1], 16);
+  const extAfter = await rgAt(extPt[0], extPt[1], 5);
+  t("眼尾外扩区可涂(锁区外扩~15%)", extAfter > extBefore + 6,
+    `${extBefore.toFixed(0)}→${extAfter.toFixed(0)}`);
+
+  // v3.1-C2:笔触为沿睑切线压扁的椭圆——单点轻触,横向同距有色、纵向无色
+  await page.click('[data-m="oneclick"]');
+  await page.locator("#swatches .sw").first().click();            // 清手涂层
+  await page.click('[data-m="smear"]');
+  await page.waitForTimeout(200);
+  await drag([[ePt[0], ePt[1]], [ePt[0], ePt[1]]]);               // 单点tap
+  await page.waitForTimeout(280);
+  const tapC = await rgAt(ePt[0], ePt[1], 4);
+  const tapH = await rgAt(ePt[0] + 40, ePt[1], 4);
+  const tapV = await rgAt(ePt[0], ePt[1] - 40, 4);
+  t("眼影笔触横扁贴合睑形(横向40px有色,纵向40px无色)",
+    tapC > -170 && tapH > tapV + 8 && tapH > -170,
+    `中${tapC.toFixed(0)} 横${tapH.toFixed(0)} 纵${tapV.toFixed(0)}`);
   await page.click('[data-m="oneclick"]');
   await page.locator("#swatches .sw").first().click();            // 回一键并清手涂层
 

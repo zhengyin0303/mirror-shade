@@ -762,11 +762,20 @@ function smoothAnchors() {
 function sp(id) { return smCache.get(id) || S.lm[id]; }  // 平滑后锚点(未缓存时回退原始点)
 
 /* ---------- 腮红 ---------- */
-function buildBlushLockPath(c, f) {                       // 锁区:两颊柔边大椭圆(一键腮红最大覆盖域)
-  const r = f.mw * 0.52 * 1.25, L = sp(205), R = sp(425);
+function clipBlushLock(c, f) {                            // v3.1-C:锁区收紧——椭圆∩[鼻翼竖线,脸缘]
+  const r = f.mw * 0.52 * 1.1, L = sp(205), R = sp(425);
   c.beginPath();
-  c.ellipse(L.x, L.y, r, r * 0.85, 0, 0, Math.PI * 2);
-  c.ellipse(R.x, R.y, r, r * 0.85, 0, 0, Math.PI * 2);
+  c.ellipse(L.x, L.y, r, r * 0.8, 0, 0, Math.PI * 2);
+  c.ellipse(R.x, R.y, r, r * 0.8, 0, 0, Math.PI * 2);
+  c.clip();
+  const H = c.canvas.height;
+  const nL = sp(129), nR = sp(358), eL = sp(234), eR = sp(454);   // 鼻翼 / 脸缘
+  if (nL && nR && eL && eR) {                             // 内界不过鼻翼竖线,外界不出脸缘
+    c.beginPath();
+    c.rect(Math.min(eL.x, nL.x), 0, Math.abs(nL.x - eL.x), H);
+    c.rect(Math.min(nR.x, eR.x), 0, Math.abs(eR.x - nR.x), H);
+    c.clip();
+  }
 }
 function drawBlush(f) {
   const W = cv.width, H = cv.height, it = S.blush.int;
@@ -775,7 +784,7 @@ function drawBlush(f) {
   maskX.clearRect(0, 0, W, H);
   if (S.blush.mode === "smear") {                         // 手涂:涂抹层经锁区裁切作蒙版
     maskX.save();
-    buildBlushLockPath(maskX, f); maskX.clip();           // 涂出界自动裁掉
+    clipBlushLock(maskX, f);                              // 涂出界自动裁掉(鼻翼内/脸缘外不可达)
     const m = paintMatrix(blushFrame(), SMEAR_CFG.blush);
     maskX.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
     maskX.drawImage(PAINT.blush.c, 0, 0);
@@ -853,10 +862,24 @@ function shadeDarken(hex, k) {
   const f2 = v => Math.round(v * (1 - k)).toString(16).padStart(2, "0");
   return "#" + f2(r) + f2(g) + f2(b);
 }
-function buildEyeLockPath(c, f) {                         // 锁区:双眼上睑带,上浮量×1.3给涂抹余量
+function eyeLockPoly(arc) {                               // v3.1-C:锁区=全上睑+眼尾外扩~15%+上至眉下缘70%
+  const lash = arc.map(i => ({ x: sp(i).x, y: sp(i).y }));
+  const n = lash.length;
+  const tail = { x: lash[n-1].x + (lash[n-1].x - lash[n-2].x) * 1.2,   // 末段≈弧长1/8,1.2倍≈外扩15%
+                 y: lash[n-1].y + (lash[n-1].y - lash[n-2].y) * 1.2 };
+  const pts = lash.concat([tail]);
+  const browBotY = arc === EYE_L ? sp(52).y : sp(282).y;  // 本侧眉下缘中点
+  const lift = Math.max(4, (lash[Math.floor(n / 2)].y - browBotY) * 0.70);
+  const up = pts.map((p, k) => {
+    const t = Math.min(1, k / (n - 1));
+    return { x: p.x, y: p.y - lift * (0.45 + 0.55 * Math.sin(Math.PI * t)) };
+  });
+  return pts.map(p => [p.x, p.y]).concat(up.reverse().map(p => [p.x, p.y]));
+}
+function buildEyeLockPath(c, f) {
   c.beginPath();
-  smoothPath(c, eyePoly(EYE_L, f, 0, 1, 1.3));
-  smoothPath(c, eyePoly(EYE_R, f, 0, 1, 1.3));
+  smoothPath(c, eyeLockPoly(EYE_L));
+  smoothPath(c, eyeLockPoly(EYE_R));
 }
 function drawEye(f) {
   const W = cv.width, H = cv.height, it = S.eye.int;
@@ -1423,27 +1446,46 @@ cv.addEventListener("wheel", e => { e.preventDefault(); setZoom(S.zoom - e.delta
 
 function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 
-/* 在目标品类涂抹层盖一笔(两点间插值,避免断点;刷径按区域尺度随仿射等比换算) */
+/* 在目标品类涂抹层盖一笔(两点间插值,避免断点;刷径按区域尺度随仿射等比换算)
+   v3.1-C:眼影上妆笔触=沿就近眼弧切线压扁的椭圆(2.2:1),涂感为晕染;擦除保持圆形 */
+function eyeStampAngle(px, py, f) {                       // 涂抹层空间内,最近上睑弧段的切线角
+  const arc = px < PW / 2 ? EYE_L : EYE_R;
+  let best = null, ang = 0, prev = null;
+  for (const id of arc) {
+    const p = sp(id), q = toPaintXY(p.x, p.y, f, SMEAR_CFG.eye);
+    if (prev) {
+      const d = Math.hypot((prev[0] + q[0]) / 2 - px, (prev[1] + q[1]) / 2 - py);
+      if (best === null || d < best) { best = d; ang = Math.atan2(q[1] - prev[1], q[0] - prev[0]); }
+    }
+    prev = q;
+  }
+  return ang;
+}
 function stampTo(x, y, tgt) {
   const [px, py] = toPaintXY(x, y, tgt.frame, SMEAR_CFG[tgt.key]);
   const r = S.brush === "big" ? 56 : 30;
+  const shape = (tgt.key === "eye" && !S.eraser)
+    ? { ang: eyeStampAngle(px, py, tgt.frame), sx: 1.48, sy: 0.673 }   // 2.2:1 压扁
+    : null;
   const step = r * 0.45;
   let from = S.lastPaint || [px, py];
   const dist = Math.hypot(px - from[0], py - from[1]);
   const n = Math.max(1, Math.ceil(dist / step));
   for (let i = 1; i <= n; i++)
-    stamp(PAINT[tgt.key], from[0] + (px - from[0]) * i / n, from[1] + (py - from[1]) * i / n, r);
+    stamp(PAINT[tgt.key], from[0] + (px - from[0]) * i / n, from[1] + (py - from[1]) * i / n, r, shape);
   S.lastPaint = [px, py];
 }
-function stamp(P, px, py, r) {
+function stamp(P, px, py, r, shape) {
   const c = P.x;
   c.save();
   if (S.eraser) { c.globalCompositeOperation = "destination-out"; c.globalAlpha = 0.5; }
   else { c.globalCompositeOperation = "source-over"; c.globalAlpha = S.brush === "big" ? 0.11 : 0.15; P.has = true; }
-  const g = c.createRadialGradient(px, py, 0, px, py, r);
+  c.translate(px, py);
+  if (shape) { c.rotate(shape.ang); c.scale(shape.sx, shape.sy); }
+  const g = c.createRadialGradient(0, 0, 0, 0, 0, r);
   g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.65, "rgba(255,255,255,.55)");
   g.addColorStop(1, "rgba(255,255,255,0)");
-  c.fillStyle = g; c.beginPath(); c.arc(px, py, r, 0, Math.PI * 2); c.fill();
+  c.fillStyle = g; c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); c.fill();
   c.restore();
 }
 
@@ -1779,6 +1821,7 @@ window.__msDebug = () => ({
     eyeCornerL: [S.lm[33].x, S.lm[33].y], eyeCornerR: [S.lm[263].x, S.lm[263].y],
     lipB: [(S.lm[17].x + S.lm[14].x) / 2, (S.lm[17].y + S.lm[14].y) / 2],   // 下唇带中点
     browLS: [sp(105).x, sp(105).y],                                          // 二次平滑后的左眉峰(测抖动)
+    browBotL: [sp(52).x, sp(52).y],                                          // 左眉下缘中点(眼锁区上界)
     mw: Math.hypot(S.lm[291].x - S.lm[61].x, S.lm[291].y - S.lm[61].y) } : null,
   W: cv.width, H: cv.height });
 
