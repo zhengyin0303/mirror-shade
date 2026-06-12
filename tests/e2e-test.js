@@ -1,9 +1,10 @@
 // 镜色 MirrorShade 端到端自动化测试(Playwright + 假摄像头 + Mock人脸)
-const { chromium } = require("/home/claude/.npm-global/lib/node_modules/playwright");
+const { chromium } = require("playwright");
 const fs = require("fs");
+const path = require("path");
 
-const HTML = fs.readFileSync("/home/claude/mirror-shade.html", "utf8");
-const MOCK = fs.readFileSync("/home/claude/mock-facemesh.js", "utf8");
+const HTML = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+const MOCK = fs.readFileSync(path.join(__dirname, "mock-facemesh.js"), "utf8");
 const ORIGIN = "http://localhost:7777";
 
 let pass = 0, fail = 0;
@@ -14,7 +15,6 @@ const t = (name, ok, extra) => {
 
 (async () => {
   const browser = await chromium.launch({
-    executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
     args: ["--no-sandbox", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
   });
   const ctx = await browser.newContext({ acceptDownloads: true, viewport: { width: 390, height: 844 } });
@@ -330,8 +330,9 @@ const t = (name, ok, extra) => {
 
   // T19 截图存档供人工查看
   await page.waitForTimeout(500);
-  await page.screenshot({ path: "/home/claude/e2e-screenshot.png" });
-  t("测试截图已保存", fs.existsSync("/home/claude/e2e-screenshot.png"));
+  const shotPath = path.join(__dirname, "e2e-screenshot.png");
+  await page.screenshot({ path: shotPath });
+  t("测试截图已保存", fs.existsSync(shotPath));
 
   // T20 全程无JS错误
   t("全程无JavaScript错误", errors.length === 0, errors.length ? errors.slice(0, 2).join(" | ") : "0个错误");

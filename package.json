@@ -1,0 +1,13 @@
+{
+  "name": "mirror-shade",
+  "version": "2.4.0",
+  "private": true,
+  "description": "镜色 MirrorShade · AR 口红试妆镜(单文件原型)",
+  "scripts": {
+    "test": "node tests/e2e-test.js",
+    "serve": "python3 -m http.server 8000"
+  },
+  "devDependencies": {
+    "playwright": "^1.50.0"
+  }
+}
