@@ -664,6 +664,32 @@ const t = (name, ok, extra) => {
   await page.waitForTimeout(800);
   const dbgFps = await page.evaluate(() => window.__msFps);
   t("调试模式叠加帧率(__msFps>0)", typeof dbgFps === "number" && dbgFps > 0, `fps=${dbgFps}`);
+  t("调试HUD含缓存命中率与分阶段耗时",
+    await page.evaluate(() => window.__msPerf && "hitRate" in window.__msPerf
+      && "mask" in window.__msPerf && "comp" in window.__msPerf));
+
+  /* ========== v3.2.2-①:±0.8px 亚像素抖动下缓存命中率 >80% ========== */
+  await page.locator(".sw").first().click();                      // 唇上色,触发缓存路径
+  // 注入抖动并测实际锚点位移(确认约±0.8px,非空测),同时统计命中率
+  const cacheProbe = await page.evaluate(() => new Promise(res => {
+    window.__face.jitter = 0.0026;                                // 峰值≈±0.8px 画布
+    PERF.hits = 0; PERF.miss = 0; PERF._hist.length = 0;
+    const xs = []; let n = 0;
+    const tick = () => {
+      xs.push(window.__msDebug().lm.browL[0]);
+      if (++n < 50) requestAnimationFrame(tick);
+      else {
+        window.__face.jitter = 0;
+        const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+        const std = Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length);
+        res({ hitRate: window.__msPerf.hitRate, std });
+      }
+    };
+    requestAnimationFrame(tick);
+  }));
+  t("抖动确为亚像素级(原始锚点std在0.2–1.5px)", cacheProbe.std > 0.2 && cacheProbe.std < 1.5,
+    `std=${cacheProbe.std.toFixed(2)}px`);
+  t("±0.8px抖动下缓存命中率>80%(DoD)", cacheProbe.hitRate > 80, `命中率=${cacheProbe.hitRate}%`);
 
   /* ========== v3.2.1-⑧:大屏面板适配 ========== */
   await page.setViewportSize({ width: 1024, height: 800 });

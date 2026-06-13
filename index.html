@@ -408,24 +408,37 @@ for (const k of ["lip", "blush", "brow", "eye"]) {
 const catSig = { lip: "", blush: "", brow: "", eye: "" };
 const REV = { lip: 0, blush: 0, brow: 0, eye: 0 };
 function bumpRev(key) { if (REV[key] !== undefined) REV[key]++; }
-function anchorSig(ids) {                                // 锚点量化0.5px拼签名
+function anchorSig(ids) {                                // v3.2.2-①:平滑后锚点 + 量化3px(亚像素抖动下稳定)
   let s = "";
   for (const id of ids) { const p = sp(id) || (S.lm && S.lm[id]);
-    if (p) s += Math.round(p.x * 2) + "," + Math.round(p.y * 2) + ";"; }
+    if (p) s += Math.round(p.x / 3) + "," + Math.round(p.y / 3) + ";"; }
   return s;
 }
+// v3.2.2-①:每类取少数代表锚点(均在SM_IDS,平滑后);命中率≈p^N,锚点越少越稳。
+// 平移使全部锚点同向移动,少数点即可捕获;形状/模板/质地变更走 bumpRev,不依赖签名。
 const SIG_IDS = {
-  lip:   [61, 291, 0, 17, 13, 14, 78, 308],
-  blush: [205, 425, 234, 454, 195, 50, 101, 280, 330],
-  brow:  [70, 63, 105, 66, 107, 55, 65, 52, 53, 46, 300, 293, 334, 296, 336, 285, 295, 282, 283, 276],
-  eye:   [133, 157, 159, 161, 33, 362, 384, 386, 388, 263, 55, 52, 46, 285, 282, 276],
+  lip:   [61, 291, 0, 17],          // 嘴角×2 + 唇峰中 + 下唇中(张嘴由 0/17 分离捕获)
+  blush: [205, 425, 195],           // 颧×2 + 鼻梁
+  brow:  [105, 334, 70, 300],       // 眉峰×2 + 眉头×2
+  eye:   [159, 386, 33, 263],       // 上睑中×2 + 外眼角×2
 };
+/* v3.2.2-①:性能仪表(缓存命中率 + 分阶段耗时),仅 debug 模式累计 */
+const PERF = { hits: 0, miss: 0, recog: 0, mask: 0, comp: 0, dbg: 0, rebuilds: 0, _hist: [] };
+function perfHit(dirty) {                                // 滚动窗口(120次品类检查)统计命中率
+  PERF._hist.push(dirty ? 0 : 1);
+  if (PERF._hist.length > 120) PERF._hist.shift();
+  if (dirty) { PERF.miss++; PERF.rebuilds++; } else PERF.hits++;
+}
 function maskDirty(key) {                                // 脏=锚点动了或状态变了;干净返回false并复用缓存
   const sig = anchorSig(SIG_IDS[key]) + "|" + REV[key];
-  if (catSig[key] === sig) return false;
+  const dirty = catSig[key] !== sig;
+  if (DEBUG) perfHit(dirty);
+  if (!dirty) return false;
   catSig[key] = sig;
   return true;
 }
+function rebuildStart() { return DEBUG ? performance.now() : 0; }
+function rebuildEnd(t) { if (DEBUG) PERF.mask += performance.now() - t; }
 const FILTER_OK = (() => { try { const c = document.createElement("canvas").getContext("2d");
   c.filter = "blur(2px)"; return c.filter.indexOf("blur") >= 0; } catch (e) { return false; } })();
 
@@ -525,7 +538,11 @@ let pumpToken = 0, lastPump = 0;
 async function pump(token) {
   if (token !== pumpToken) return;
   lastPump = Date.now();
-  if (video.readyState >= 2) { try { await faceMesh.send({ image: video }); } catch (e) {} }
+  if (video.readyState >= 2) {
+    const _t = DEBUG ? performance.now() : 0;
+    try { await faceMesh.send({ image: video }); } catch (e) {}
+    if (DEBUG) PERF.recog = performance.now() - _t;       // 识别(FaceMesh)主线程耗时
+  }
   requestAnimationFrame(() => pump(token));
 }
 async function resumeCamera() {
@@ -699,11 +716,16 @@ function render() {
 
   const f = mouthFrame();
   smoothAnchors();                                       // v3.1-A:品类锚点二次平滑
+  PERF.mask = 0; PERF.rebuilds = 0;                      // 本帧分阶段计时清零
+  const _tm = DEBUG ? performance.now() : 0;
   drawMakeup(f);
+  if (DEBUG) PERF.comp = (performance.now() - _tm) - PERF.mask;   // 合成≈妆容总耗时−重建
   if (S.cat === "lip" && S.lip.mode === "shape" && S.compare !== "lip") drawShapeUI(f);
   if (DEBUG) {                                           // v3.2.1-⑥:fps统计先行,叠加开销剥离
     tickFps();
+    const _td = performance.now();
     if ((dbgFrameN = (dbgFrameN + 1) % 2) === 0) drawDebug(f);   // 独立画布,隔帧重绘
+    PERF.dbg = performance.now() - _td;
   }
 }
 
@@ -732,10 +754,22 @@ function dbgDot(p, color) {
 }
 function drawDebug(f) {
   dbgX.clearRect(0, 0, dbgCv.width, dbgCv.height);
+  // v3.2.1-⑦ / v3.2.2-①:右上角 fps + 缓存命中率 + 分阶段耗时
+  const tot = PERF.hits + PERF.miss || 1;
+  const hr = PERF._hist.length ? Math.round(100 * PERF._hist.reduce((a, b) => a + b, 0) / PERF._hist.length) : 0;
+  window.__msPerf = { fps: window.__msFps || 0, hitRate: hr, rebuilds: PERF.rebuilds,
+    recog: +PERF.recog.toFixed(1), mask: +PERF.mask.toFixed(1), comp: +PERF.comp.toFixed(1), dbg: +PERF.dbg.toFixed(1) };
   dbgX.save();
-  dbgX.font = "bold 26px monospace"; dbgX.fillStyle = "#0f0";
-  dbgX.textAlign = "right";                                // v3.2.1-⑦:右上角,避让缩放钮(占内部约120px)
-  dbgX.fillText((window.__msFps || 0) + " fps", dbgCv.width - 130, 80);
+  dbgX.textAlign = "right"; dbgX.fillStyle = "#0f0";
+  dbgX.font = "bold 26px monospace";
+  dbgX.fillText((window.__msFps || 0) + " fps", dbgCv.width - 130, 70);
+  dbgX.font = "bold 16px monospace";
+  const lines = [
+    `cache ${hr}%  rebuild ${PERF.rebuilds}/4`,
+    `recog ${PERF.recog.toFixed(1)}  mask ${PERF.mask.toFixed(1)}`,
+    `comp ${PERF.comp.toFixed(1)}  dbg ${PERF.dbg.toFixed(1)} ms`,
+  ];
+  lines.forEach((s, i) => dbgX.fillText(s, dbgCv.width - 14, 100 + i * 20));
   dbgX.restore();
   // 唇:外+内环(红)
   dbgStroke(ringPts(OUTER, f, 1), "#FF4D4D");
@@ -928,6 +962,7 @@ const SM_IDS = [
   70,63,105,66,107, 55,65,52,53,46, 300,293,334,296,336, 285,295,282,283,276,  // 眉
   133,173,157,158,159,160,161,246,33, 362,398,384,385,386,387,388,466,263,     // 上睑
   205,425,234,454,195, 50,280,101,330, 129,358,                                // 颧/鬓/鼻梁/颊辅/鼻翼
+  61,291,0,17,13,14,78,308,                                                    // v3.2.2-①:唇缓存签名锚点(仅平滑供签名,唇渲染仍用原始点)
 ];
 const smCache = new Map();
 function smoothAnchors() {
@@ -980,6 +1015,7 @@ function drawBlush(f) {
   if (!L || !R) return;
   const mx2 = catMX.blush;
   if (maskDirty("blush")) {                               // 脏帧重建缓存蒙版(含染色)
+    const _rt = rebuildStart();
     mx2.clearRect(0, 0, W, H);
     if (S.blush.mode === "smear") {                       // 手涂:浓度场重建,锁区裁切
       drawField("blush", f, c => clipBlushLock(c, f), mx2);
@@ -1002,6 +1038,7 @@ function drawBlush(f) {
       }
     }
     tintMask(mx2, S.blush.color.c);
+    rebuildEnd(_rt);
   }
   compositeFrom(catM.blush, 0.55*it, 0.38*it);
   if (S.blush.texture === "shimmer") blushShimmer(f, it);
@@ -1042,6 +1079,7 @@ function drawBrow(f) {
   if (!S.lm[70] || !S.lm[300]) return;
   const mx2 = catMX.brow;
   if (maskDirty("brow")) {
+    const _rt = rebuildStart();
     mx2.clearRect(0, 0, W, H);
     mx2.save();
     try { mx2.filter = "blur(2.5px)"; } catch (e) {}
@@ -1052,6 +1090,7 @@ function drawBrow(f) {
     try { mx2.filter = "none"; } catch (e) {}
     mx2.restore();
     tintMask(mx2, S.brow.color.c);
+    rebuildEnd(_rt);
   }
   compositeFrom(catM.brow, 0.30*it, 0.62*it);
 }
@@ -1103,6 +1142,7 @@ function drawEye(f) {
   if (!S.lm[133] || !S.lm[362]) return;
   const mx2 = catMX.eye;
   if (maskDirty("eye")) {
+    const _rt = rebuildStart();
     mx2.clearRect(0, 0, W, H);
     if (S.eye.mode === "smear") {                         // 手涂:浓度场重建,上睑带锁区裁切
       drawField("eye", f, c => { buildEyeLockPath(c, f); c.clip(); }, mx2);
@@ -1117,6 +1157,7 @@ function drawEye(f) {
       mx2.restore();
     }
     tintMask(mx2, S.eye.color.c);
+    rebuildEnd(_rt);
   }
   compositeFrom(catM.eye, 0.55*it, 0.42*it);
   if (S.eye.texture === "pearl") eyePearl(f, it);
@@ -1141,6 +1182,7 @@ function drawLips(f) {
 
   // 1) 蒙版(脏帧重建,含染色一并缓存)
   if (maskDirty("lip")) {
+    const _rt = rebuildStart();
     mx2.clearRect(0, 0, W, H);
     if (S.lip.maskMode === "full") {
       mx2.save();
@@ -1154,6 +1196,7 @@ function drawLips(f) {
       drawField("lip", f, c => { buildLipPath(c, f); c.clip("evenodd"); }, mx2);
     }
     tintMask(mx2, S.lip.color.c);
+    rebuildEnd(_rt);
   }
 
   // 2) 合成到画面:color 换色保留唇纹 + multiply 加深 + 深唇基底补偿
