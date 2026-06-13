@@ -868,7 +868,7 @@ function eyePearl(f, it) {                                // 珠光:强度介于
    品类子网格上,锁区天然成立。
 ==================================================================== */
 function mkField(n) { return { dens: new Float32Array(n), nodes: [], has: false }; }
-const FIELD = { lip: mkField(60), blush: mkField(14), eye: mkField(44) };
+const FIELD = { lip: mkField(60), blush: mkField(34), eye: mkField(44) };
 function clearField(key) { const F = FIELD[key]; if (F) { F.dens.fill(0); F.has = false; } }
 const BRUSH_SCALE = { lip: 1.6, blush: 1.8, eye: 1.4 };  // 刷径按区域尺度等比(沿用旧仿射span值)
 
@@ -878,16 +878,36 @@ function lipFieldNodes(f) {                              // 唇:外环20+内环2
   const mid = o.map((p, j) => [(p[0] + inn[j][0]) / 2, (p[1] + inn[j][1]) / 2]);
   return o.concat(inn, mid).map(p => [p[0], p[1], br]);
 }
-function blushFieldNodes(f) {                            // 腮红:每侧颧心+实点环(上/内/外)+镜像下环
-  const out = [], br = f.mw * 0.34;
-  for (const side of [[205, 50, 101, 234], [425, 280, 330, 454]]) {
-    const c = sp(side[0]);
-    out.push([c.x, c.y, br * 1.2]);
-    const ring = side.slice(1).map(id => sp(id));
-    for (const p of ring) out.push([p.x, p.y, br]);
-    for (const p of ring) out.push([2 * c.x - p.x, 2 * c.y - p.y, br]);   // 下环=上环对颧心镜像
+function blushFieldNodes(f) {                            // 腮红:每侧颧心 + 双层极坐标密集环(v3.2.2-②:34节点)
+  const out = [], br = f.mw * 0.22;                       // 节点更密→半径更小,叠加更平滑
+  const ux = f.ux, uy = f.uy, vx = f.vx, vy = f.vy;       // 随头部旋转的局部轴
+  for (const cid of [205, 425]) {
+    const c = sp(cid), R = f.mw * 0.30;
+    out.push([c.x, c.y, br * 1.3]);
+    for (const [rad, n, jr] of [[R * 0.5, 6, br], [R, 10, br]]) {         // 内环6 + 外环10
+      for (let k = 0; k < n; k++) {
+        const a = k / n * Math.PI * 2;
+        const ox = Math.cos(a) * rad, oy = Math.sin(a) * rad * 0.78;      // 略扁,贴颊形
+        out.push([c.x + ux * ox + vx * oy, c.y + uy * ox + vy * oy, jr]);
+      }
+    }
   }
-  return out;
+  return out;                                            // (1+6+10)×2 = 34
+}
+/* v3.2.2-②:蒙版整体羽化(经 maskC 中转 blur,FILTER_OK 时生效) */
+function featherMask(mc, px) {
+  if (!FILTER_OK || px < 0.5) return;
+  const W = cv.width, H = cv.height;
+  maskX.clearRect(0, 0, W, H); maskX.drawImage(mc.canvas, 0, 0);
+  mc.clearRect(0, 0, W, H);
+  mc.save(); mc.filter = `blur(${px}px)`; mc.drawImage(maskC, 0, 0); mc.filter = "none"; mc.restore();
+}
+/* 把蒙版裁到锁区(destination-in;锁区边界硬切防越界) */
+function clipMaskTo(mc, clipFn) {
+  const W = cv.width, H = cv.height;
+  maskX.clearRect(0, 0, W, H);
+  maskX.save(); clipFn(maskX); maskX.fillStyle = "#fff"; maskX.fillRect(0, 0, W, H); maskX.restore();
+  mc.save(); mc.globalCompositeOperation = "destination-in"; mc.drawImage(maskC, 0, 0); mc.restore();
 }
 function eyeFieldNodes() {                               // 眼影:内角延伸+睑弧9点+眼尾延伸,各配上排点(向眉下缘55%)
   const out = [];                                        // v3.2.1-③:完整含内外眼角
@@ -1017,11 +1037,11 @@ function drawBlush(f) {
   if (maskDirty("blush")) {                               // 脏帧重建缓存蒙版(含染色)
     const _rt = rebuildStart();
     mx2.clearRect(0, 0, W, H);
-    if (S.blush.mode === "smear") {                       // 手涂:浓度场重建,锁区裁切
-      drawField("blush", f, c => clipBlushLock(c, f), mx2);
-      blushEdgeFeather(mx2, f);                           // v3.2.1-⑤:脸缘侧羽化,转角越大越宽
+    if (S.blush.mode === "smear") {                       // 手涂:密集浓度场(不内裁)→整体羽化→锁区硬裁
+      drawField("blush", f, () => {}, mx2);
+      featherMask(mx2, f.mw * 0.12);                      // v3.2.2-②:整体羽化消硬边
     } else {
-      const r = f.mw * 0.52;
+      const r = f.mw * 0.48;                              // v3.2.2-②:一键椭圆略收
       if (S.blush.style === "apple") {
         softSpot(mx2, L.x, L.y, r, r*0.82, 0, .9);
         softSpot(mx2, R.x, R.y, r, r*0.82, 0, .9);
@@ -1037,6 +1057,8 @@ function drawBlush(f) {
         softSpot(mx2, NB.x, NB.y, r*0.55, r*0.22, 0, .7);
       }
     }
+    clipMaskTo(mx2, c => clipBlushLock(c, f));            // v3.2.2-②:两种模式统一锁区硬裁(不越鼻翼/脸缘)
+    blushEdgeFeather(mx2, f);                             // v3.2.1-⑤:脸缘侧随转角羽化
     tintMask(mx2, S.blush.color.c);
     rebuildEnd(_rt);
   }

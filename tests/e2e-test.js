@@ -458,6 +458,9 @@ const t = (name, ok, extra) => {
   await rub(ckL[0], ckL[1], 30);
   const cheekSm1 = await cheekRG();
   t("腮红手涂上色(R-G抬升)", cheekSm1 > cheekSm0 + 10, `${cheekSm0.toFixed(0)}→${cheekSm1.toFixed(0)}`);
+  // v3.2.2-②:颊区浓度场加密至30+节点
+  const blushNodes = await page.evaluate(() => FIELD.blush.dens.length);
+  t("腮红浓度场节点≥30(消硬边)", blushNodes >= 30, `${blushNodes}节点`);
 
   const forePt = [D.W * 0.5, D.H * 0.18];
   const foreBefore = await rgAt(forePt[0], forePt[1], 8);
