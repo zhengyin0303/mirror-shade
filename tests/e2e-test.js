@@ -86,7 +86,10 @@ const t = (name, ok, extra) => {
   const lipRG  = async () => rgAt(D.lm.lipB[0], D.lm.lipB[1], 6);
   const cheekRG = async () => rgAt(D.lm.cheekL[0], D.lm.cheekL[1], 8);
   const browLum = async () => lumAt(D.lm.browC[0], D.lm.browC[1], 10);   // v3.2.1-④:修正后眉心采样
-  const eyeRG  = async () => rgAt(D.lm.eyeL[0], D.lm.eyeL[1] - D.lm.mw * 0.16, 7);
+  // v3.2.2-③:眼影采样改眉眼距基准(随渲染带几何),取 35% 处(带内),非嘴宽偏移
+  const eyePt = () => [D.lm.eyeL[0] + (D.lm.browBotL[0] - D.lm.eyeL[0]) * 0.35,
+                       D.lm.eyeL[1] + (D.lm.browBotL[1] - D.lm.eyeL[1]) * 0.35];
+  const eyeRG  = async () => { const p = eyePt(); return rgAt(p[0], p[1], 6); };
 
   await page.goto(ORIGIN + "/");
 
@@ -526,9 +529,14 @@ const t = (name, ok, extra) => {
   const eyeSm1 = await eyeSmRG();
   t("眼影手涂上色(R-G抬升)", eyeSm1 > eyeSm0 + 8, `${eyeSm0.toFixed(0)}→${eyeSm1.toFixed(0)}`);
 
+  const resetEyeField = async () => {                             // 清空眼影手涂层(切一键点色→回手涂)取干净基线
+    await page.click('[data-m="oneclick"]'); await page.locator("#swatches .sw").first().click();
+    await page.click('[data-m="smear"]'); await page.waitForTimeout(150);
+  };
   // v3.1-C2:眼尾外扩区可涂(旧锁区止于眼角)
+  await resetEyeField();
   const corner = D.lm.eyeCornerL;
-  const extPt = [corner[0] + (corner[0] - D.lm.eyeL[0]) * 0.3, corner[1] - 12];
+  const extPt = [corner[0] + (corner[0] - D.lm.eyeL[0]) * 0.10, corner[1] - 12];  // 取0.10×眼宽(在~13%延伸带内)
   const extBefore = await rgAt(extPt[0], extPt[1], 5);
   await rub(extPt[0], extPt[1], 16);
   const extAfter = await rgAt(extPt[0], extPt[1], 5);
@@ -536,6 +544,7 @@ const t = (name, ok, extra) => {
     `${extBefore.toFixed(0)}→${extAfter.toFixed(0)}`);
 
   // v3.2.1-③:内眼角侧同样可涂(子网格与锁区完整含内外眼角)
+  await resetEyeField();
   const inn = D.lm.eyeInnerL;
   const innPt = [inn[0] + (inn[0] - D.lm.eyeL[0]) * 0.15, inn[1] - 10];
   const innBefore = await rgAt(innPt[0], innPt[1], 5);
@@ -560,11 +569,26 @@ const t = (name, ok, extra) => {
   await page.click('[data-m="oneclick"]');
   await page.locator("#swatches .sw").first().click();            // 回一键并清手涂层
 
+  // v3.2.2-③ DoD:上缘不高于眉眼距60% —— 隔离测(仅眼影,避免眉妆下沿溢色污染)
+  await pressDrift("#clearBtn", 15);                               // 长按全卸,再仅上眼影
+  await page.locator("#swatches .sw").first().click();
+  await page.locator("#intensity").fill("85");
+  await page.waitForTimeout(380);
+  await refresh();
+  const ebBare = -135;                                            // 素颜基线(冻结帧背景R-G)
+  const eb = fr => [D.lm.eyeL[0] + (D.lm.browBotL[0] - D.lm.eyeL[0]) * fr,
+                    D.lm.eyeL[1] + (D.lm.browBotL[1] - D.lm.eyeL[1]) * fr];
+  const at40 = await rgAt(eb(0.40)[0], eb(0.40)[1], 4);
+  const at60 = await rgAt(eb(0.60)[0], eb(0.60)[1], 4);
+  t("眼影上缘不高于眉眼距60%(40%有色/60%基本无色)", at40 > ebBare + 25 && at60 < ebBare + 20,
+    `40%=${at40.toFixed(0)} 60%=${at60.toFixed(0)} 素≈${ebBare}`);
+
   /* ========== 质地:标签 / 提亮 / 记忆 / 眉妆隐藏 ========== */
   t("眼影质地行=哑光/珠光", (await page.locator("#texSeg").textContent()) === "哑光珠光");
   await page.waitForTimeout(300);
   await refresh();
-  const pearlPt = [D.lm.eyeL[0], D.lm.eyeL[1] - D.lm.mw * 0.14];
+  const pearlPt = [D.lm.eyeL[0] + (D.lm.browBotL[0] - D.lm.eyeL[0]) * 0.32,
+                   D.lm.eyeL[1] + (D.lm.browBotL[1] - D.lm.eyeL[1]) * 0.32];   // 带内32%(珠光高光处)
   const eyeMatteLum = await lumAt(pearlPt[0], pearlPt[1], 7);
   await page.click('#texSeg [data-tex="pearl"]');
   await page.waitForTimeout(300);
