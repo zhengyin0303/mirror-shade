@@ -94,9 +94,9 @@ const t = (name, ok, extra) => {
   await page.goto(ORIGIN + "/");
 
   /* ========== 启动与肤色分析 ========== */
-  t("启动页渲染(品牌字+开始按钮+隐私声明+v3.2标记)",
+  t("启动页渲染(品牌字+开始按钮+隐私声明+v3.2.2标记)",
     await page.locator("#startBtn").isVisible() && await page.locator(".privacy").isVisible()
-    && (await page.locator("#startScreen").textContent()).includes("v3.2"));
+    && (await page.locator("#startScreen").textContent()).includes("v3.2.2"));
 
   await page.click("#startBtn");
   await page.waitForSelector("#startScreen", { state: "hidden", timeout: 15000 }).catch(() => {});
@@ -697,14 +697,15 @@ const t = (name, ok, extra) => {
 
   /* ========== v3.2.2-①:±0.8px 亚像素抖动下缓存命中率 >80% ========== */
   await page.locator(".sw").first().click();                      // 唇上色,触发缓存路径
-  // 注入抖动并测实际锚点位移(确认约±0.8px,非空测),同时统计命中率
+  // 注入诚实的 ±0.8px 峰值抖动(std≈0.46),预热 20 帧让平滑收敛后再统计 150 帧
   const cacheProbe = await page.evaluate(() => new Promise(res => {
-    window.__face.jitter = 0.0026;                                // 峰值≈±0.8px 画布
-    PERF.hits = 0; PERF.miss = 0; PERF._hist.length = 0;
-    const xs = []; let n = 0;
+    window.__face.jitter = 0.0019;                                // 峰值≈±0.8px 画布(uniform 半幅)
+    const xs = []; let n = 0, warm = 20;
     const tick = () => {
+      if (warm > 0) { warm--; if (warm === 0) { PERF.hits = 0; PERF.miss = 0; PERF._hist.length = 0; }
+        return requestAnimationFrame(tick); }
       xs.push(window.__msDebug().lm.browL[0]);
-      if (++n < 50) requestAnimationFrame(tick);
+      if (++n < 150) requestAnimationFrame(tick);
       else {
         window.__face.jitter = 0;
         const m = xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -714,7 +715,7 @@ const t = (name, ok, extra) => {
     };
     requestAnimationFrame(tick);
   }));
-  t("抖动确为亚像素级(原始锚点std在0.2–1.5px)", cacheProbe.std > 0.2 && cacheProbe.std < 1.5,
+  t("抖动确为亚像素级(原始锚点std在0.2–1.0px)", cacheProbe.std > 0.2 && cacheProbe.std < 1.0,
     `std=${cacheProbe.std.toFixed(2)}px`);
   t("±0.8px抖动下缓存命中率>80%(DoD)", cacheProbe.hitRate > 80, `命中率=${cacheProbe.hitRate}%`);
 

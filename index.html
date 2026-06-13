@@ -211,7 +211,7 @@
   <button id="startBtn">开启镜子</button>
   <div class="privacy">所有画面仅在本机处理,不会离开你的手机</div>
   <div id="loadMsg"></div>
-  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v3.2.1</div>
+  <div style="margin-top:18px;font-size:11px;color:var(--muted);opacity:.7;">v3.2.2</div>
 </div>
 
 <video id="video" playsinline muted autoplay></video>
@@ -1080,24 +1080,57 @@ function drawBlush(f) {
 /* ---------- 眉妆 ---------- */
 const BROW_L_TOP = [70,63,105,66,107], BROW_L_BOT = [55,65,52,53,46];
 const BROW_R_TOP = [300,293,334,296,336], BROW_R_BOT = [285,295,282,283,276];
-function browPoly(top, bot, f) {
-  let pts = top.map(i => ({ x: sp(i).x, y: sp(i).y }))
-    .concat(bot.map(i => ({ x: sp(i).x, y: sp(i).y })));
-  const cx = pts.reduce((a,p)=>a+p.x,0)/pts.length, cy = pts.reduce((a,p)=>a+p.y,0)/pts.length;
+/* v3.2.2-④:贴合修正后的上/下沿点(沿用 v3.2.1 已对位的修正与模板,只改后续渲染方式) */
+function browEdges(top, bot) {
+  let T = top.map(i => ({ x: sp(i).x, y: sp(i).y }));
+  let B = bot.map(i => ({ x: sp(i).x, y: sp(i).y }));
+  const all = T.concat(B);
+  const cx = all.reduce((a, p) => a + p.x, 0) / all.length, cy = all.reduce((a, p) => a + p.y, 0) / all.length;
   const h = Math.max(4, Math.abs(sp(top[2]).y - sp(bot[2]).y));
-  // v3.2.1-④ 贴合修正(真机回环:轮廓偏上约半眉高/眉尾外溢/过宽扁):
-  // 整体下移0.5眉高;宽度×0.93、高度×1.22;眉尾两点向内收
-  pts = pts.map(p => ({ x: cx + (p.x - cx) * 0.93, y: cy + (p.y - cy) * 1.22 + h * 0.5 }));
-  pts[0].x = cx + (pts[0].x - cx) * 0.86; pts[1].x = cx + (pts[1].x - cx) * 0.94;
-  pts[pts.length-1].x = cx + (pts[pts.length-1].x - cx) * 0.86;
-  pts[pts.length-2].x = cx + (pts[pts.length-2].x - cx) * 0.94;
-  if (S.brow.shape === "bold")
-    pts = pts.map(p => ({ x: cx + (p.x-cx)*1.06, y: cy + (p.y-cy)*1.45 }));
-  if (S.brow.shape === "arch") {                           // 挑眉:尾部上扬(top/bot首元素为外端)
-    pts[0].y -= h*0.7; pts[1].y -= h*0.35;
-    pts[pts.length-1].y -= h*0.55; pts[pts.length-2].y -= h*0.25;
+  const corr = p => ({ x: cx + (p.x - cx) * 0.93, y: cy + (p.y - cy) * 1.22 + h * 0.5 });
+  T = T.map(corr); B = B.map(corr);
+  const n = T.length;
+  T[0].x = cx + (T[0].x - cx) * 0.86; T[1].x = cx + (T[1].x - cx) * 0.94;        // 眉尾(外端)向内收
+  B[n-1].x = cx + (B[n-1].x - cx) * 0.86; B[n-2].x = cx + (B[n-2].x - cx) * 0.94;
+  if (S.brow.shape === "bold") {                          // 加粗:整体扩(宽×1.06 高×1.45)
+    T = T.map(p => ({ x: cx + (p.x-cx)*1.06, y: cy + (p.y-cy)*1.45 }));
+    B = B.map(p => ({ x: cx + (p.x-cx)*1.06, y: cy + (p.y-cy)*1.45 }));
   }
-  return pts.map(p => [p.x, p.y]);
+  if (S.brow.shape === "arch") {                          // 挑眉:眉尾上扬
+    T[0].y -= h*0.7; T[1].y -= h*0.35; B[n-1].y -= h*0.55; B[n-2].y -= h*0.25;
+  }
+  return { T, B, h, cx, cy };
+}
+function browPoly(top, bot, f) {                          // 轮廓(调试用):上沿 + 反向下沿
+  const { T, B } = browEdges(top, bot);
+  return T.map(p => [p.x, p.y]).concat(B.slice().reverse().map(p => [p.x, p.y]));
+}
+function catmullPt(pts, i, t) {                           // 段内 Catmull-Rom 取点
+  const p0 = pts[Math.max(0,i-1)], p1 = pts[i], p2 = pts[Math.min(pts.length-1,i+1)], p3 = pts[Math.min(pts.length-1,i+2)];
+  const t2 = t*t, t3 = t2*t;
+  const f = (a,b,c,d) => 0.5*((2*b)+(-a+c)*t+(2*a-5*b+4*c-d)*t2+(-a+3*b-3*c+d)*t3);
+  return { x: f(p0.x,p1.x,p2.x,p3.x), y: f(p0.y,p1.y,p2.y,p3.y) };
+}
+/* 中轴笔刷带:上下沿配对取中轴+局部半宽,重采样,沿轴盖渐变圆刷,两端 taper(消眉头钩/直线拼接) */
+function drawBrowBand(c, top, bot) {
+  const { T, B } = browEdges(top, bot), n = T.length;
+  const axis = [], hw = [];
+  for (let k = 0; k < n; k++) {
+    axis.push({ x: (T[k].x+B[k].x)/2, y: (T[k].y+B[k].y)/2 });
+    hw.push(Math.max(1.5, Math.hypot(T[k].x-B[k].x, T[k].y-B[k].y) / 2));
+  }
+  const M = 20;
+  for (let s = 0; s <= M; s++) {
+    const u = s / M * (n-1), i = Math.min(n-2, Math.floor(u)), fr = u - i;
+    const p = catmullPt(axis, i, fr);
+    const w = hw[i] + (hw[i+1]-hw[i]) * fr;
+    const taper = 0.30 + 0.70 * Math.sin(Math.PI * s / M);      // 两端收窄,中段最宽
+    const r = Math.max(1.2, w * taper);
+    const g = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+    g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.6, "rgba(255,255,255,.9)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    c.fillStyle = g; c.beginPath(); c.arc(p.x, p.y, r, 0, Math.PI*2); c.fill();
+  }
 }
 function browCenter(top, bot) {                           // 贴合修正后的眉区中心(测试/调试锚点)
   const ids = top.concat(bot);
@@ -1115,11 +1148,10 @@ function drawBrow(f) {
     const _rt = rebuildStart();
     mx2.clearRect(0, 0, W, H);
     mx2.save();
-    try { mx2.filter = "blur(2.5px)"; } catch (e) {}
+    try { mx2.filter = `blur(${Math.max(2, f.mw * 0.012)}px)`; } catch (e) {}  // 整体羽化
     mx2.fillStyle = "#fff";
-    for (const pts of [browPoly(BROW_L_TOP, BROW_L_BOT, f), browPoly(BROW_R_TOP, BROW_R_BOT, f)]) {
-      mx2.beginPath(); smoothPath(mx2, pts); mx2.fill();
-    }
+    drawBrowBand(mx2, BROW_L_TOP, BROW_L_BOT);
+    drawBrowBand(mx2, BROW_R_TOP, BROW_R_BOT);
     try { mx2.filter = "none"; } catch (e) {}
     mx2.restore();
     tintMask(mx2, S.brow.color.c);
